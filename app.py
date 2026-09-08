@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.8.0"
+APP_CACHE_VERSION = "v1.9.0"
 
 # Direct Stream / Raw Image Link using updated Transparent Badge ID
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
@@ -406,16 +406,25 @@ def format_form_df(df_in, display_cols):
 
 
 def render_fixture_card(r, all_fixtures_df):
-    opp = r["away"] if istarget(r["home"]) else r["home"]
-    venue = "Home" if istarget(r["home"]) else "Away"
+    is_home = istarget(r["home"])
+    opp = r["away"] if is_home else r["home"]
+    venue = "Home" if is_home else "Away"
     comp = r["competition"]
     br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
-    p = win_chance(br, orr, istarget(r["home"]))
-    status_display = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
+    p = win_chance(br, orr, is_home)
+    
+    if r["status"] == "FT":
+        status_display = f"{int(r['hg'])} - {int(r['ag'])}" if is_home else f"{int(r['ag'])} - {int(r['hg'])}"
+    else:
+        status_display = str(r["status"])
 
     with st.container(border=True):
         st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
-        st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_display}`")
+        
+        if is_home:
+            st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_display}`")
+        else:
+            st.markdown(f"**{opp}** vs **Bishopton FC Black** — `{status_display}`")
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
@@ -436,7 +445,7 @@ league = div.get(4, empty_df())
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Header Banner with significantly larger badge
+# Header Banner with enlarged, borderless transparent badge
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
@@ -480,11 +489,20 @@ with col_fx:
             st.caption("No completed results recorded yet.")
         else:
             for _, r in completed_all.head(3).iterrows():
-                opp = r["away"] if istarget(r["home"]) else r["home"]
-                score = f"{int(r['hg'])} - {int(r['ag'])}"
+                is_home = istarget(r["home"])
+                opp = r["away"] if is_home else r["home"]
+                
+                # Accurately orient goals based on venue
+                if is_home:
+                    score = f"{int(r['hg'])} - {int(r['ag'])}"
+                    fixture_text = f"**Bishopton FC Black** `{score}` **{opp}**"
+                else:
+                    score = f"{int(r['ag'])} - {int(r['hg'])}"
+                    fixture_text = f"**{opp}** `{score}` **Bishopton FC Black**"
+
                 with st.container(border=True):
                     st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}*")
-                    st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
+                    st.markdown(fixture_text)
 
 with col_tbl:
     st.subheader("📊 Division 4 Standings")
