@@ -5,9 +5,8 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.9.0"
+APP_CACHE_VERSION = "v2.0.0"
 
-# Direct Stream / Raw Image Link using updated Transparent Badge ID
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 
@@ -18,7 +17,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Professional Modern Sports Visual Identity System
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&family=Inter:wght@400;500;600&display=swap');
@@ -407,24 +405,29 @@ def format_form_df(df_in, display_cols):
 
 def render_fixture_card(r, all_fixtures_df):
     is_home = istarget(r["home"])
-    opp = r["away"] if is_home else r["home"]
-    venue = "Home" if is_home else "Away"
+    
+    if is_home:
+        home_team, away_team = "Bishopton FC Black", r["away"]
+        home_score, away_score = r["hg"], r["ag"]
+        venue = "Home"
+    else:
+        home_team, away_team = r["home"], "Bishopton FC Black"
+        home_score, away_score = r["hg"], r["ag"]
+        venue = "Away"
+
     comp = r["competition"]
+    opp = away_team if is_home else home_team
     br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
     p = win_chance(br, orr, is_home)
     
     if r["status"] == "FT":
-        status_display = f"{int(r['hg'])} - {int(r['ag'])}" if is_home else f"{int(r['ag'])} - {int(r['hg'])}"
+        status_display = f"{int(home_score)} - {int(away_score)}"
     else:
         status_display = str(r["status"])
 
     with st.container(border=True):
         st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
-        
-        if is_home:
-            st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_display}`")
-        else:
-            st.markdown(f"**{opp}** vs **Bishopton FC Black** — `{status_display}`")
+        st.markdown(f"**{home_team}** `{status_display}` **{away_team}**")
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
@@ -441,11 +444,9 @@ def render_fixture_card(r, all_fixtures_df):
 div, cups, diagnostics = load_data()
 league = div.get(4, empty_df())
 
-# Combine ALL competitions for form & strength calculations
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Header Banner with enlarged, borderless transparent badge
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
@@ -490,19 +491,17 @@ with col_fx:
         else:
             for _, r in completed_all.head(3).iterrows():
                 is_home = istarget(r["home"])
-                opp = r["away"] if is_home else r["home"]
                 
-                # Accurately orient goals based on venue
                 if is_home:
+                    h_team, a_team = "Bishopton FC Black", r["away"]
                     score = f"{int(r['hg'])} - {int(r['ag'])}"
-                    fixture_text = f"**Bishopton FC Black** `{score}` **{opp}**"
                 else:
-                    score = f"{int(r['ag'])} - {int(r['hg'])}"
-                    fixture_text = f"**{opp}** `{score}` **Bishopton FC Black**"
+                    h_team, a_team = r["home"], "Bishopton FC Black"
+                    score = f"{int(r['hg'])} - {int(r['ag'])}"
 
                 with st.container(border=True):
                     st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}*")
-                    st.markdown(fixture_text)
+                    st.markdown(f"**{h_team}** `{score}` **{a_team}**")
 
 with col_tbl:
     st.subheader("📊 Division 4 Standings")
@@ -522,7 +521,6 @@ with col_tbl:
 
 st.divider()
 
-# Upcoming Division 4 Schedule Section
 st.header("📅 Division 4 Schedule")
 if league.empty:
     st.info("No Division 4 league fixtures available.")
@@ -546,7 +544,6 @@ else:
 
 st.divider()
 
-# Cup Competitions Section
 st.header("🏆 Cup Competitions")
 
 cup_found = False
