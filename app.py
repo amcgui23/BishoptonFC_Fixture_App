@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.0.6"
+APP_CACHE_VERSION = "v1.0.7"
 
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
@@ -31,7 +31,6 @@ def empty_df():
 
 def clean(x):
     text = re.sub(r"\s+", " ", str(x or "")).strip()
-    # Strip away Round/Week artifacts from team names
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     return text.strip()
 
@@ -90,14 +89,12 @@ def parse_matches(url, competition):
     soup = BeautifulSoup(html, "html.parser")
     out = []
 
-    # Process match blocks row-by-row instead of full-page text regex
     current_date = None
     current_round = "League/Cup"
 
     for element in soup.find_all(['div', 'tr', 'li', 'p']):
         text = clean(element.get_text(" ", strip=True))
         
-        # Check if element contains a date header
         date_match = re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", text, re.I)
         if date_match and len(text) < 60:
             parsed_dt = ordinal_date(date_match.group(0))
@@ -111,7 +108,7 @@ def parse_matches(url, competition):
         if not current_date:
             continue
 
-        # Finished Match (e.g., Team A 3 - 2 Team B or Team A 3 2 Team B)
+        # Finished Match
         m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d+)\s*[-–]\s*(?P<ag>\d+)\s+(?P<away>.+?)$", text)
         if not m:
             m = re.search(r"^(?P<home>[A-Za-z\s()0-9.-]+?)\s+(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>[A-Za-z\s()0-9.-]+?)$", text)
@@ -122,7 +119,7 @@ def parse_matches(url, competition):
                                 hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT", competition=competition))
                 continue
 
-        # Scheduled Match (e.g., Team A 09:00 Team B)
+        # Scheduled Match
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
         if m:
             h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
@@ -131,7 +128,7 @@ def parse_matches(url, competition):
                                 hg=None, ag=None, status=m.group("kick"), competition=competition))
                 continue
 
-        # Postponed Match (e.g., Team A P-P Team B)
+        # Postponed Match
         m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
         if m:
             h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
@@ -244,7 +241,6 @@ def official_table(_v=APP_CACHE_VERSION):
                 cols = [str(c).strip().lower() for c in t.columns]
                 joined = " ".join(cols)
                 if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
-                    # Clean team column header and artifacts
                     team_col = [c for c in t.columns if "club" in str(c).lower() or "team" in str(c).lower()][0]
                     t[team_col] = t[team_col].apply(clean)
                     return t, url
@@ -354,14 +350,15 @@ for cup_name, cdf in cups.items():
         cup_found = True
         st.subheader(cup_name)
         for _, r in cfx.iterrows():
-            opp = r.away if istarget(r.home) else r.home
-            venue = "Home" if istarget(r.home) else "Away"
-            status_str = f"{int(r.hg)} - {int(r.ag)}" if r.status == "FT" else r.status
+            opp = r["away"] if istarget(r["home"]) else r["home"]
+            venue = "Home" if istarget(r["home"]) else "Away"
+            round_label = str(r["round"]) if "round" in r else "Cup Round"
+            status_str = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
             br, orr = form(all_div, "Bishopton FC Black"), form(all_div, opp)
-            p = win_chance(br, orr, istarget(r.home))
+            p = win_chance(br, orr, istarget(r["home"]))
             
             with st.container(border=True):
-                st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** ({r.round}) • *{venue}*")
+                st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** ({round_label}) • *{venue}*")
                 st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_str}`")
                 
                 c1, c2, c3 = st.columns(3)
