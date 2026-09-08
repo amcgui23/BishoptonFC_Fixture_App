@@ -8,12 +8,12 @@ from bs4 import BeautifulSoup
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
 BASE = "https://www.pjdyfl.co.uk"
-TARGET = "Bishopton FC Black (2014)"
 DIV_URLS = {i: f"{BASE}/2014-division-{i}" for i in range(1, 5)}
 TABLE_URLS = [f"{BASE}/leaguestablefeed/1104", f"{BASE}/leaguetablefeed/1103"]
 CUPS = {
     "Scottish Cup": f"{BASE}/scottish-cup-2014",
     "League Cup": f"{BASE}/league-cup-2014",
+    "PJDYFL Cup": f"{BASE}/pjdyfl-cup-2014",
 }
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15",
@@ -35,12 +35,14 @@ def norm(x):
 
 
 def istarget(x):
-    return norm(x).startswith("bishopton fc black")
+    # Flexible matching for team variants like "Bishopton FC Black", "Bishopton Black 2014", etc.
+    n = norm(x)
+    return bool(re.search(r"\bbishopton\b.*\bblack\b", n))
 
 
 def ordinal_date(s):
     s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", clean(s))
-    for f in ("%A, %d %B %Y", "%d %B %Y"):
+    for f in ("%A, %d %B %Y", "%d %B %Y", "%A %d %B %Y"):
         try:
             return datetime.strptime(s, f).date()
         except ValueError:
@@ -50,56 +52,14 @@ def ordinal_date(s):
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch(url):
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.status_code, r.url, r.text
-
-
-def parse_line(line, date, rnd, competition):
-    line = clean(line)
-    if not date or not line:
-        return None
-
-    # Completed result: the site currently renders e.g.
-    # "Bishopton FC Black (2014)3 2 Bridge of weir United (2014)"
-    patterns = [
-        r"^(.*?\))\s*(\d+)\s+(\d+)\s+(.*?)(?:\s+Half time score:|\s+Kick off time:|$)",
-        r"^(.*?)\s+(\d+)\s+(\d+)\s+(.*?)(?:\s+Half time score:|\s+Kick off time:|$)",
-    ]
-    for p in patterns:
-        m = re.match(p, line, re.I)
-        if m:
-            home, hg, ag, away = clean(m.group(1)), int(m.group(2)), int(m.group(3)), clean(m.group(4))
-            if home and away and len(home) < 120 and len(away) < 120:
-                return dict(date=date, round=rnd, home=home, away=away, hg=hg, ag=ag,
-                            status="FT", competition=competition)
-
-    # Future fixture: e.g. "Erskine Youth FC (2014)09:00 Bishopton FC Black (2014)"
-    patterns = [
-        r"^(.*?\))\s*(\d{1,2}:\d{2})\s+(.*?)(?:\s+(?:[A-Z][A-Za-z .&'-]+(?:Community|Park|Centre|Complex|Astroturf|School|Ground|Fields?).*))?$",
-        r"^(.*?)\s+(\d{1,2}:\d{2})\s+(.*)$",
-    ]
-    for p in patterns:
-        m = re.match(p, line, re.I)
-        if m:
-            home, kick, away = clean(m.group(1)), m.group(2), clean(m.group(3))
-            # Remove common venue suffixes where they have been swallowed into away.
-            away = re.split(r"\s+(?:Mossedge Community Pitch|Holm Park|India Tyres|Nethercraigs Sport Complex|New Western Park|Millburn Park|Parklea playing fields|Seedhill Playing Fields|Gray Street Astroturf|TORYGLEN FOOTBALL CENTRE|Renfrew Leisure Centre|Williams Street Football Park|Cowan Park.*)$", away, flags=re.I)[0].strip()
-            if home and away and len(home) < 120 and len(away) < 120:
-                return dict(date=date, round=rnd, home=home, away=away, hg=None, ag=None,
-                            status=kick, competition=competition)
-
-    # Postponed fixtures.
-    m = re.match(r"^(.*?)\s+P-P\s+(.*?)(?:\s+Kick off time:.*)?$", line, re.I)
-    if m:
-        return dict(date=date, round=rnd, home=clean(m.group(1)), away=clean(m.group(2)),
-                    hg=None, ag=None, status="Postponed", competition=competition)
-
-    return None
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=15)
+        return r.status_code, r.url, r.text
+    except Exception:
+        return 404, url, ""
 
 
 def strip_venue(text, leading=True):
-    """Remove common TeamExpert venue text accidentally attached to a match row."""
     text = clean(text)
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
@@ -108,7 +68,6 @@ def strip_venue(text, leading=True):
         "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
         "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
     ]
-    # Prefer exact known venues, then use conservative generic venue endings.
     if leading:
         for v in sorted(venues, key=len, reverse=True):
             if re.match(r"^" + re.escape(v) + r"\b", text, re.I):
@@ -116,7 +75,6 @@ def strip_venue(text, leading=True):
     else:
         for v in sorted(venues, key=len, reverse=True):
             text = re.sub(r"\s*" + re.escape(v) + r"\s*$", "", text, flags=re.I)
-    # Generic fallbacks for venue strings that TeamExpert appends without a space.
     if leading:
         text = re.sub(r"^(?:[A-Z][A-Za-z'&.-]*(?:\s+[A-Z][A-Za-z'&.-]*){0,5})\s+(?:Park|Pitch|Fields?|Complex|Centre|Center|Astroturf|School)\b", "", text, flags=re.I).strip()
     else:
@@ -125,13 +83,12 @@ def strip_venue(text, leading=True):
 
 
 def parse_match_segment(seg, date, rnd, competition):
-    """Parse one match segment immediately before a TeamExpert 'Kick off time' marker."""
     seg = clean(seg)
     if not seg or not date:
         return None
 
-    # Results. The half-time marker gives us an unambiguous row boundary.
-    m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)\s+Half time score:\s*\d+\s*-\s*\d+", seg, re.I)
+    # Completed match string
+    m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)(?:\s+Half time score:|\s+Kick off time:|$)", seg, re.I)
     if m:
         home = strip_venue(m.group("home"), leading=True)
         away = strip_venue(m.group("away"), leading=False)
@@ -140,7 +97,7 @@ def parse_match_segment(seg, date, rnd, competition):
                         hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT",
                         competition=competition)
 
-    # Postponed / abandoned rows.
+    # Postponed match string
     m = re.search(r"(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", seg, re.I)
     if m:
         home = strip_venue(m.group("home"), leading=True)
@@ -149,8 +106,7 @@ def parse_match_segment(seg, date, rnd, competition):
             return dict(date=date, round=rnd, home=home, away=away,
                         hg=None, ag=None, status="Postponed", competition=competition)
 
-    # Future fixture. The first HH:MM is the fixture kick-off time; the final
-    # 'Kick off time' marker is stripped before this function is called.
+    # Scheduled match string
     m = re.search(r"(?P<home>.+?)(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", seg)
     if m:
         home = strip_venue(m.group("home"), leading=True)
@@ -163,15 +119,12 @@ def parse_match_segment(seg, date, rnd, competition):
 
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
-    soup = BeautifulSoup(html, "html.parser")
+    if status != 200 or not html:
+        return empty_df(), {"url": final_url, "http": status, "parsed": 0}
 
-    # TeamExpert's match rows are not stable HTML table rows. Depending on the
-    # page, BeautifulSoup may split a single fixture into many text nodes. The
-    # browser-readable page does, however, consistently contain date headings,
-    # Round headings and a 'Kick off time:' marker for every match. We use those
-    # stable markers instead of relying on individual HTML nodes.
+    soup = BeautifulSoup(html, "html.parser")
     text = clean(soup.get_text(" ", strip=True))
-    date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}(?:st|nd|rd|th)\s+\w+\s+\d{4}", re.I)
+    date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4}", re.I)
     dates = list(date_re.finditer(text))
     out = []
 
@@ -180,16 +133,10 @@ def parse_matches(url, competition):
         block_end = dates[i + 1].start() if i + 1 < len(dates) else len(text)
         block = text[dm.end():block_end]
         rm = re.search(r"Round:\s*([^\s]+)", block, re.I)
-        rnd = rm.group(1) if rm else ""
-        if rm:
-            block = block[rm.end():]
+        rnd = rm.group(1) if rm else "Cup Round"
 
-        # Every fixture on this site has a final 'Kick off time: HH:MM'.
-        # Splitting on that marker isolates one fixture at a time; the only
-        # complication is that the previous fixture's venue can prefix the next
-        # segment, which strip_venue() handles.
-        parts = re.split(r"Kick off time:\s*\d{1,2}:\d{2}", block, flags=re.I)
-        for seg in parts[:-1]:
+        parts = re.split(r"(?:Kick off time:|Half time score:)", block, flags=re.I)
+        for seg in parts:
             parsed = parse_match_segment(seg, date, rnd, competition)
             if parsed:
                 out.append(parsed)
@@ -198,13 +145,12 @@ def parse_matches(url, competition):
         "url": final_url,
         "http": status,
         "text_len": len(html),
-        "raw_nodes": len(list(soup.stripped_strings)),
         "date_blocks": len(dates),
         "parsed": len(out),
     }
     if not out:
         return empty_df(), info
-    df = pd.DataFrame(out, columns=COLS).drop_duplicates(["date", "home", "away", "competition", "round"])
+    df = pd.DataFrame(out, columns=COLS).drop_duplicates(["date", "home", "away", "competition"])
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values("date").reset_index(drop=True), info
 
@@ -232,23 +178,23 @@ def load_data():
 
 
 def results(df, team):
+    cols = ["date", "opponent", "GF", "GA", "GD", "Result", "venue", "competition"]
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=cols)
     rows = []
-    target = norm(team)
     for _, r in df.iterrows():
         if r.status != "FT":
             continue
-        if norm(r.home) == target:
+        if istarget(r.home) if istarget(team) else norm(r.home) == norm(team):
             gf, ga, opp, venue = int(r.hg), int(r.ag), r.away, "H"
-        elif norm(r.away) == target:
+        elif istarget(r.away) if istarget(team) else norm(r.away) == norm(team):
             gf, ga, opp, venue = int(r.ag), int(r.hg), r.home, "A"
         else:
             continue
         rows.append({"date": r.date, "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga,
                      "Result": "W" if gf > ga else "D" if gf == ga else "L", "venue": venue,
                      "competition": r.competition})
-    return pd.DataFrame(rows).sort_values("date", ascending=False) if rows else pd.DataFrame()
+    return pd.DataFrame(rows, columns=cols).sort_values("date", ascending=False) if rows else pd.DataFrame(columns=cols)
 
 
 def form(df, team, n=5):
@@ -273,15 +219,25 @@ def win_chance(a, b, home=True):
 
 
 def calculated_table(df):
+    cols = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
     if df.empty or not {"home", "away"}.issubset(df.columns):
-        return pd.DataFrame(columns=["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"])
+        return pd.DataFrame(columns=cols)
     teams = set(df.home.dropna()) | set(df.away.dropna())
     rows = []
     for t in teams:
         r = results(df, t)
-        w, d, l = (r.Result == "W").sum(), (r.Result == "D").sum(), (r.Result == "L").sum()
-        rows.append([t, len(r), w, d, l, r.GF.sum(), r.GA.sum(), r.GD.sum(), 3*w+d])
-    return pd.DataFrame(rows, columns=["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
+        if r.empty:
+            rows.append([t, 0, 0, 0, 0, 0, 0, 0, 0])
+            continue
+        w = (r["Result"] == "W").sum()
+        d = (r["Result"] == "D").sum()
+        l = (r["Result"] == "L").sum()
+        gf = r["GF"].sum()
+        ga = r["GA"].sum()
+        gd = gf - ga
+        pts = 3 * w + d
+        rows.append([t, len(r), w, d, l, gf, ga, gd, pts])
+    return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -305,82 +261,99 @@ league = div.get(4, empty_df())
 all_nonempty = [x for x in div.values() if not x.empty]
 all_div = pd.concat(all_nonempty, ignore_index=True) if all_nonempty else empty_df()
 
-st.title("⚽ Bishopton FC Black 2014 — Fixtures & Form Guide")
-st.caption("Live PJDYFL data • estimates are statistical guides, not betting odds")
+st.title("⚽ Bishopton FC Black 2014")
 
 with st.sidebar:
-    st.header("Data")
-    if st.button("🔄 Refresh PJDYFL data"):
-        st.cache_data.clear(); st.rerun()
-    st.write("Sources: PJDYFL 2014 Divisions 1–4, Scottish Cup and League Cup.")
-    with st.expander("Data-source diagnostics"):
+    st.header("Data Controls")
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
+        st.rerun()
+    with st.expander("Diagnostics"):
         for item in diagnostics:
             st.write(item)
 
-st.header("🏆 Division 4")
-st.subheader("Bishopton FC Black fixtures")
-if league.empty:
-    st.error("Could not parse Division 4 fixtures from PJDYFL. Open Data-source diagnostics in the sidebar for details.")
-else:
-    fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
-    for _, r in fx.iterrows():
-        opp = r.away if istarget(r.home) else r.home
-        home = istarget(r.home)
-        score = f"{int(r.hg)}–{int(r.ag)}" if r.status == "FT" else r.status
-        st.markdown(f"### {r.date.strftime('%a %d %b %Y')} — {'Home' if home else 'Away'}")
-        st.markdown(f"**Bishopton FC Black** vs **{opp}** — **{score}**")
-        br, orr = form(league, TARGET), form(league, opp)
-        p = win_chance(br, orr, home)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Bishopton last 5", "".join(br.Result.tolist()) if not br.empty else "—")
-        c2.metric("Opponent last 5", "".join(orr.Result.tolist()) if not orr.empty else "—")
-        c3.metric("Estimated Bishopton win chance", f"{p:.0%}" if p is not None else "N/A")
-        with st.expander("Form guide"):
-            a, b = st.columns(2)
-            with a:
-                st.write("**Bishopton FC Black**")
-                st.dataframe(br[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
-            with b:
-                st.write(f"**{opp}**")
-                st.dataframe(orr[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
-        st.divider()
+# Two-column layout: Fixtures on the left, League Table on the right
+col_fx, col_tbl = st.columns([1, 1])
 
-st.subheader("Division 4 League Table")
-ot, ot_url = official_table()
-if ot is not None:
-    st.dataframe(ot, hide_index=True, use_container_width=True)
-    st.caption(f"Official PJDYFL league table source: {ot_url}")
-else:
-    st.dataframe(calculated_table(league), hide_index=True, use_container_width=True)
-    st.caption("Fallback table calculated from published Division 4 results because the table feed was not machine-readable.")
+with col_fx:
+    st.subheader("Division 4 Fixtures")
+    if league.empty:
+        st.info("No Division 4 fixtures currently loaded.")
+    else:
+        fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
+        upcoming = fx[fx.status != "FT"]
+        completed = fx[fx.status == "FT"]
 
-st.header("🥇 Cup Competitions")
-for cup, cdf in cups.items():
-    st.subheader(cup)
+        st.markdown("#### 📅 Upcoming Matches")
+        if upcoming.empty:
+            st.caption("No upcoming league fixtures scheduled.")
+        else:
+            for _, r in upcoming.iterrows():
+                opp = r.away if istarget(r.home) else r.home
+                venue = "Home" if istarget(r.home) else "Away"
+                br, orr = form(league, "Bishopton FC Black"), form(league, opp)
+                p = win_chance(br, orr, istarget(r.home))
+                with st.container(border=True):
+                    st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** • *{venue}*")
+                    st.markdown(f"**Bishopton FC Black** vs **{opp}**")
+                    st.caption(f"Kick-off / Status: **{r.status}**")
+                    if p is not None:
+                        st.caption(f"Estimated Win Chance: **{p:.0%}**")
+
+        st.markdown("#### 🏁 Recent Results")
+        if completed.empty:
+            st.caption("No completed results recorded yet.")
+        else:
+            for _, r in completed.iterrows():
+                opp = r.away if istarget(r.home) else r.home
+                score = f"{int(r.hg)} - {int(r.ag)}"
+                with st.container(border=True):
+                    st.markdown(f"**{r.date.strftime('%a %d %b %Y')}**")
+                    st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
+
+with col_tbl:
+    st.subheader("Division 4 Standings")
+    ot, ot_url = official_table()
+    tbl_data = ot if ot is not None else calculated_table(league)
+    
+    # Render with height parameter so all rows are visible without scrolling the whole page
+    st.dataframe(
+        tbl_data,
+        hide_index=True,
+        use_container_width=True,
+        height=600
+    )
+    if ot is not None:
+        st.caption(f"Official PJDYFL table source: {ot_url}")
+    else:
+        st.caption("Calculated dynamic standings from parsed Division 4 results.")
+
+st.divider()
+st.header("🏆 Cup Competitions")
+
+cup_found = False
+for cup_name, cdf in cups.items():
     if cdf.empty:
-        st.warning("Could not parse this competition from PJDYFL.")
         continue
-    fx = cdf[cdf.home.map(istarget) | cdf.away.map(istarget)].sort_values("date")
-    if fx.empty:
-        st.info("No Bishopton FC Black fixture currently found.")
-        continue
-    for _, r in fx.iterrows():
-        opp = r.away if istarget(r.home) else r.home
-        home = istarget(r.home)
-        score = f"{int(r.hg)}–{int(r.ag)}" if r.status == "FT" else r.status
-        st.markdown(f"### {r.date.strftime('%a %d %b %Y')} — {'Home' if home else 'Away'}")
-        st.markdown(f"**Bishopton FC Black** vs **{opp}** — **{score}**")
-        br, orr = form(all_div, TARGET), form(all_div, opp)
-        p = win_chance(br, orr, home)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Bishopton last 5", "".join(br.Result.tolist()) if not br.empty else "—")
-        c2.metric("Opponent last 5", "".join(orr.Result.tolist()) if not orr.empty else "—")
-        c3.metric("Estimated Bishopton win chance", f"{p:.0%}" if p is not None else "N/A")
-        with st.expander("Opponent form guide"):
-            if orr.empty:
-                st.warning("No completed results found for this opponent in PJDYFL Divisions 1–4.")
-            else:
-                st.dataframe(orr[["date", "opponent", "GF", "GA", "Result", "competition"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
-        st.divider()
+    cfx = cdf[cdf.home.map(istarget) | cdf.away.map(istarget)]
+    if not cfx.empty:
+        cup_found = True
+        st.subheader(cup_name)
+        for _, r in cfx.iterrows():
+            opp = r.away if istarget(r.home) else r.home
+            venue = "Home" if istarget(r.home) else "Away"
+            status_str = f"{int(r.hg)} - {int(r.ag)}" if r.status == "FT" else r.status
+            br, orr = form(all_div, "Bishopton FC Black"), form(all_div, opp)
+            p = win_chance(br, orr, istarget(r.home))
+            
+            with st.container(border=True):
+                st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** ({r.round}) • *{venue}*")
+                st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_str}`")
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Bishopton form", "".join(br.Result.tolist()) if not br.empty else "—")
+                c2.metric("Opponent form", "".join(orr.Result.tolist()) if not orr.empty else "—")
+                c3.metric("Est. Win Chance", f"{p:.0%}" if p is not None else "N/A")
 
-st.caption("PJDYFL is the data source. This app is intended as a coaching/fan analytics tool and makes no guarantee about match outcomes.")
+if not cup_found:
+    st.info("No Scottish Cup or League Cup fixtures were detected for Bishopton FC Black in the current web scrape. Check the Diagnostics expander in the sidebar to inspect page status.")
