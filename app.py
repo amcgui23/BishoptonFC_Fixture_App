@@ -5,10 +5,11 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
+APP_CACHE_VERSION = "v1.0.5"
+
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
 BASE = "https://www.pjdyfl.co.uk"
-TARGET = "Bishopton FC Black (2014)"
 DIV_URLS = {i: f"{BASE}/2014-division-{i}" for i in range(1, 5)}
 TABLE_URLS = [f"{BASE}/leaguestablefeed/1104", f"{BASE}/leaguetablefeed/1103"]
 CUPS = {
@@ -19,6 +20,7 @@ CUPS = {
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Safari/605.1.15",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Cache-Control": "no-cache",
 }
 COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition"]
 
@@ -48,15 +50,15 @@ def ordinal_date(s):
         try:
             dt = datetime.strptime(s, f)
             if dt.year == 1900:
-                dt = dt.replace(year=datetime.now().year)
+                dt = dt.replace(year=2026)
             return dt.date()
         except ValueError:
             pass
     return None
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def fetch(url):
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch(url, _v=APP_CACHE_VERSION):
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
         return r.status_code, r.url, r.text
@@ -88,7 +90,6 @@ def parse_match_segment(seg, date, rnd, competition):
     if not seg or not date:
         return None
 
-    # Completed Match
     m = re.search(r"(?P<home>.+?)\s+(?P<hg>\d+)\s*[-–]\s*(?P<ag>\d+)\s+(?P<away>.+?)(?:\s+Half time|\s+Kick off|$)", seg, re.I)
     if not m:
         m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)(?:\s+Half time|\s+Kick off|$)", seg, re.I)
@@ -99,7 +100,6 @@ def parse_match_segment(seg, date, rnd, competition):
                         hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT",
                         competition=competition)
 
-    # Postponed Match
     m = re.search(r"(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", seg, re.I)
     if m:
         h, a = strip_venue(m.group("home"), True), strip_venue(m.group("away"), False)
@@ -107,7 +107,6 @@ def parse_match_segment(seg, date, rnd, competition):
             return dict(date=date, round=rnd, home=h, away=a,
                         hg=None, ag=None, status="Postponed", competition=competition)
 
-    # Upcoming / Scheduled Match (HH:MM)
     m = re.search(r"(?P<home>.+?)\s*(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", seg)
     if m:
         h, a = strip_venue(m.group("home"), True), strip_venue(m.group("away"), False)
@@ -125,7 +124,6 @@ def parse_matches(url, competition):
     soup = BeautifulSoup(html, "html.parser")
     text = clean(soup.get_text(" ", strip=True))
     
-    # Expanded regex to capture varied date formats on PJDYFL
     date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", re.I)
     dates = list(date_re.finditer(text))
     out = []
@@ -151,8 +149,8 @@ def parse_matches(url, competition):
     return df.sort_values("date").reset_index(drop=True), info
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def load_data():
+@st.cache_data(ttl=300, show_spinner=False)
+def load_data(_v=APP_CACHE_VERSION):
     div, cups, diagnostics = {}, {}, []
     for d, u in DIV_URLS.items():
         try:
@@ -236,8 +234,8 @@ def calculated_table(df):
     return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
 
-@st.cache_data(ttl=900, show_spinner=False)
-def official_table():
+@st.cache_data(ttl=300, show_spinner=False)
+def official_table(_v=APP_CACHE_VERSION):
     for url in TABLE_URLS:
         try:
             html = fetch(url)[2]
@@ -252,6 +250,15 @@ def official_table():
     return None, None
 
 
+def format_form_df(df_in, display_cols):
+    if df_in.empty:
+        return pd.DataFrame(columns=display_cols)
+    df_out = df_in[display_cols].copy()
+    if "date" in df_out.columns:
+        df_out["date"] = pd.to_datetime(df_out["date"], errors="coerce").dt.strftime("%d/%m")
+    return df_out
+
+
 div, cups, diagnostics = load_data()
 league = div.get(4, empty_df())
 all_nonempty = [x for x in div.values() if not x.empty]
@@ -261,14 +268,14 @@ st.title("⚽ Bishopton FC Black 2014")
 
 with st.sidebar:
     st.header("Data Controls")
-    if st.button("🔄 Refresh Data"):
+    if st.button("🔄 Force Clear & Refresh"):
         st.cache_data.clear()
         st.rerun()
     with st.expander("Diagnostics"):
+        st.caption(f"App Cache Version: {APP_CACHE_VERSION}")
         for item in diagnostics:
             st.write(item)
 
-# Two-column view: Fixtures on left, League Table on right
 col_fx, col_tbl = st.columns([1, 1])
 
 with col_fx:
@@ -296,15 +303,14 @@ with col_fx:
                     if p is not None:
                         st.caption(f"Estimated Win Chance: **{p:.0%}**")
                     
-                    # Restored Detailed Form Expander
                     with st.expander("Form Guide"):
                         ca, cb = st.columns(2)
                         with ca:
                             st.write("**Bishopton FC**")
-                            st.dataframe(br[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m")), hide_index=True, use_container_width=True)
+                            st.dataframe(format_form_df(br, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
                         with cb:
                             st.write(f"**{opp}**")
-                            st.dataframe(orr[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m")), hide_index=True, use_container_width=True)
+                            st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
 
         st.markdown("#### 🏁 Recent Results")
         if completed.empty:
@@ -360,12 +366,11 @@ for cup_name, cdf in cups.items():
                 c2.metric("Opponent form", "".join(orr.Result.tolist()) if not orr.empty else "—")
                 c3.metric("Est. Win Chance", f"{p:.0%}" if p is not None else "N/A")
 
-                # Restored Cup Form Expander
                 with st.expander("Opponent Form Guide"):
                     if orr.empty:
                         st.write("No recorded games for this opponent.")
                     else:
-                        st.dataframe(orr[["date", "opponent", "GF", "GA", "Result", "competition"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
+                        st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
 
 if not cup_found:
     st.info("No Cup fixtures detected for Bishopton FC Black.")
