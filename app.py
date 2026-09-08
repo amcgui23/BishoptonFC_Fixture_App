@@ -11,7 +11,7 @@ BASE="https://www.pjdyfl.co.uk"
 TARGET="Bishopton FC Black (2014)"
 DIV_URLS={i:f"{BASE}/2014-division-{i}" for i in range(1,5)}
 LEAGUE_URL=DIV_URLS[4]
-TABLE_URL=f"{BASE}/leaguestablefeed/1104"
+TABLE_URLS=[f"{BASE}/leaguestablefeed/1104", f"{BASE}/leaguetablefeed/1103"]
 CUPS={"Scottish Cup":f"{BASE}/scottish-cup-2014","League Cup":f"{BASE}/league-cup-2014"}
 HEADERS={"User-Agent":"Mozilla/5.0 BishoptonFCFixtureGuide/1.0"}
 
@@ -32,12 +32,20 @@ def page(url):
 def parse_matches(url,competition):
     soup=BeautifulSoup(page(url),"html.parser")
     lines=[clean(x) for x in soup.get_text("\n").splitlines() if clean(x)]
-    date=None; rnd=""
-    out=[]
+    date=None; rnd=""; out=[]
     date_re=re.compile(r"^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}(?:st|nd|rd|th)\s+\w+\s+\d{4}$")
     round_re=re.compile(r"^Round:\s*(.*)$")
-    score_re=re.compile(r"^(.*?)\s+(\d+)\s+(\d+)\s+(.*?)(?:Half time score:|Kick off time:|$)")
-    time_re=re.compile(r"^(.*?)\s+(\d{1,2}:\d{2})\s+(.*)$")
+    # PJDYFL currently renders the score/time immediately after the home-team name
+    # (e.g. "Bishopton FC Black (2014)3 2 Bridge...") so the separator before
+    # the first number is not guaranteed to be whitespace.
+    score_patterns=[
+        re.compile(r"^(.*?\))\s*(\d+)\s+(\d+)\s+(.*?)(?:Half time score:|Kick off time:|$)"),
+        re.compile(r"^(.*?)\s+(\d+)\s+(\d+)\s+(.*?)(?:Half time score:|Kick off time:|$)")
+    ]
+    time_patterns=[
+        re.compile(r"^(.*?\))\s*(\d{1,2}:\d{2})\s+(.*)$"),
+        re.compile(r"^(.*?)\s+(\d{1,2}:\d{2})\s+(.*)$")
+    ]
     for line in lines:
         if date_re.match(line): date=ordinal_date(line); continue
         m=round_re.match(line)
@@ -45,34 +53,39 @@ def parse_matches(url,competition):
         if not date: continue
         if "P-P" in line.upper():
             a=re.split(r"\s+P-P\s+",line,maxsplit=1,flags=re.I)
-            if len(a)==2: out.append(dict(date=date,round=rnd,home=clean(a[0]),away=clean(a[1].split("Kick off time:")[0]),hg=None,ag=None,status="Postponed",competition=competition))
+            if len(a)==2:
+                out.append(dict(date=date,round=rnd,home=clean(a[0]),away=clean(a[1].split("Kick off time:")[0]),hg=None,ag=None,status="Postponed",competition=competition))
             continue
-        m=score_re.match(line)
-        if m:
-            home,hg,ag,away=clean(m.group(1)),int(m.group(2)),int(m.group(3)),clean(m.group(4))
-            if len(home)<100 and len(away)<100:
-                out.append(dict(date=date,round=rnd,home=home,away=away,hg=hg,ag=ag,status="FT",competition=competition)); continue
-        m=time_re.match(line)
-        if m:
-            home,kick,away=clean(m.group(1)),m.group(2),clean(m.group(3))
-            if len(home)<100 and len(away)<100 and ("2014" in home.lower() or "fc" in home.lower() or "bc" in home.lower() or "yfc" in home.lower()):
-                out.append(dict(date=date,round=rnd,home=home,away=away,hg=None,ag=None,status=kick,competition=competition))
-    if not out:return pd.DataFrame()
+        matched=False
+        for pat in score_patterns:
+            m=pat.match(line)
+            if m:
+                home,hg,ag,away=clean(m.group(1)),int(m.group(2)),int(m.group(3)),clean(m.group(4))
+                if home and away and len(home)<100 and len(away)<100:
+                    out.append(dict(date=date,round=rnd,home=home,away=away,hg=hg,ag=ag,status="FT",competition=competition)); matched=True; break
+        if matched: continue
+        for pat in time_patterns:
+            m=pat.match(line)
+            if m:
+                home,kick,away=clean(m.group(1)),m.group(2),clean(m.group(3))
+                if home and away and len(home)<100 and len(away)<100:
+                    out.append(dict(date=date,round=rnd,home=home,away=away,hg=None,ag=None,status=kick,competition=competition)); break
+    if not out:return pd.DataFrame(columns=["date","round","home","away","hg","ag","status","competition"])
     df=pd.DataFrame(out).drop_duplicates(["date","home","away","competition","round"])
     df["date"]=pd.to_datetime(df.date)
     return df.sort_values("date").reset_index(drop=True)
 
 @st.cache_data(ttl=900,show_spinner=False)
 def load_data():
-    div={}
+    div={}; errors=[]
     for d,u in DIV_URLS.items():
         try: div[d]=parse_matches(u,f"Division {d}")
-        except Exception: div[d]=pd.DataFrame()
+        except Exception as e: div[d]=pd.DataFrame(columns=["date","round","home","away","hg","ag","status","competition"]); errors.append(f"Division {d}: {e}")
     cups={}
     for n,u in CUPS.items():
         try:cups[n]=parse_matches(u,n)
-        except Exception:cups[n]=pd.DataFrame()
-    return div,cups
+        except Exception as e:cups[n]=pd.DataFrame(columns=["date","round","home","away","hg","ag","status","competition"]); errors.append(f"{n}: {e}")
+    return div,cups,errors
 
 def results(df,team):
     if df.empty:return pd.DataFrame()
@@ -106,6 +119,9 @@ def win_chance(a,b,home=True):
     return max(.05,min(.95,1/(1+math.exp(-1.35*x))))
 
 def calculated_table(df):
+    required={"home","away"}
+    if df.empty or not required.issubset(df.columns):
+        return pd.DataFrame(columns=["Team","P","W","D","L","GF","GA","GD","Pts"])
     teams=set(df.home.dropna())|set(df.away.dropna()); rows=[]
     for t in teams:
         r=results(df,t)
@@ -114,14 +130,19 @@ def calculated_table(df):
     return pd.DataFrame(rows,columns=["Team","P","W","D","L","GF","GA","GD","Pts"]).sort_values(["Pts","GD","GF"],ascending=False).reset_index(drop=True)
 
 def official_table():
-    try:
-        tabs=pd.read_html(page(TABLE_URL))
-        for t in tabs:
-            if len(t)>=5 and len(t.columns)>=4:return t
-    except:pass
-    return None
+    for url in TABLE_URLS:
+        try:
+            tabs=pd.read_html(page(url))
+            for t in tabs:
+                cols=[str(c).strip().lower() for c in t.columns]
+                joined=" ".join(cols)
+                if len(t)>=5 and ("club" in joined or "team" in joined) and "pts" in joined:
+                    return t, url
+        except Exception:
+            continue
+    return None, None
 
-div,cups=load_data()
+div,cups,load_errors=load_data()
 league=div.get(4,pd.DataFrame())
 all_div=pd.concat([x for x in div.values() if not x.empty],ignore_index=True) if any(not x.empty for x in div.values()) else pd.DataFrame()
 
@@ -133,6 +154,9 @@ with st.sidebar:
     if st.button("🔄 Refresh PJDYFL data"):
         st.cache_data.clear(); st.rerun()
     st.write("Sources: PJDYFL 2014 Divisions 1–4, Scottish Cup and League Cup.")
+    if load_errors:
+        with st.expander("Data-source diagnostics"):
+            for err in load_errors: st.write(err)
 
 st.header("🏆 Division 4")
 st.subheader("Bishopton FC Black fixtures")
@@ -163,10 +187,10 @@ else:
         st.divider()
 
 st.subheader("Division 4 League Table")
-ot=official_table()
+ot,ot_url=official_table()
 if ot is not None:
     st.dataframe(ot,hide_index=True,use_container_width=True)
-    st.caption("Official PJDYFL table feed 1104.")
+    st.caption(f"Official PJDYFL league table source: {ot_url}")
 else:
     st.dataframe(calculated_table(league),hide_index=True,use_container_width=True)
     st.caption("Fallback table calculated from published Division 4 results because the supplied feed was not machine-readable.")
