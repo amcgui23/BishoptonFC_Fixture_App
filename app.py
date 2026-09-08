@@ -5,124 +5,140 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.2.0"
+APP_CACHE_VERSION = "v1.3.0"
 
-# Club Logo URL
-CLUB_LOGO_URL = "https://share.google/8jvgxvJ0Lk5gOgmtY"
+# Direct Stream / Raw Image Link constructed from Google Drive File ID
+FILE_ID = "1XiqwuKz-l6ILUb_7iPrq15yjheEijJ1-"
+CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 
 st.set_page_config(
-    page_title="Bishopton FC | Official Hub",
+    page_title="Bishopton FC | Performance Hub",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# Professional Club Modern Design System (CSS Injection)
+# Professional Modern Sports Visual Identity System
 st.markdown("""
     <style>
-    /* Global Styling */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&family=Inter:wght@400;500;600&display=swap');
     
     html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        font-family: 'Inter', -apple-system, sans-serif;
     }
 
-    /* Container Spacing */
+    h1, h2, h3, h4, .hero-title {
+        font-family: 'Montserrat', sans-serif !important;
+        letter-spacing: -0.03em;
+    }
+
+    /* Container Layout */
     .main .block-container {
         padding-top: 1.5rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 1200px;
+        padding-bottom: 2.5rem !important;
+        max-width: 1240px;
     }
 
-    /* Modern Hero Header Container */
+    /* Modern Glassmorphic Hero Banner */
     .hero-header {
-        background: linear-gradient(135deg, #0d1b2a 0%, #1b263b 100%);
-        border-radius: 12px;
-        padding: 1.5rem 2rem;
+        background: linear-gradient(135deg, #09131e 0%, #112233 60%, #1a3a5c 100%);
+        border-radius: 16px;
+        padding: 2rem 2.5rem;
         margin-bottom: 2rem;
         display: flex;
         align-items: center;
-        gap: 1.5rem;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        gap: 2rem;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .hero-logo-container {
+        flex-shrink: 0;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 12px;
+        padding: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        backdrop-filter: blur(8px);
     }
 
     .hero-logo {
-        width: 80px;
-        height: 80px;
+        width: 95px;
+        height: 95px;
         object-fit: contain;
-        border-radius: 8px;
-        background: rgba(255, 255, 255, 0.05);
-        padding: 6px;
+        filter: drop-shadow(0 4px 10px rgba(0,0,0,0.4));
     }
 
-    .hero-title-container h1 {
+    .hero-text {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .hero-title {
         color: #ffffff !important;
-        font-weight: 800 !important;
+        font-weight: 900 !important;
         font-size: 2.2rem !important;
         margin: 0 !important;
-        letter-spacing: -0.5px;
+        text-transform: uppercase;
+        line-height: 1.1;
     }
 
-    .hero-title-container p {
-        color: #94a3b8 !important;
-        margin: 0.25rem 0 0 0 !important;
-        font-size: 0.95rem;
-        font-weight: 500;
+    .hero-subtitle {
+        color: #00d2ff !important;
+        margin: 0.4rem 0 0 0 !important;
+        font-size: 0.85rem;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
     }
 
-    /* Card Containers */
-    div[data-testid="stForm"], div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
-        border-radius: 10px;
-    }
-
-    /* Primary Headers */
-    h2, h3, h4 {
-        font-weight: 700 !important;
-        letter-spacing: -0.3px;
-    }
-
-    /* Custom Metric Styling */
+    /* Custom Cards & Metrics Styling */
     div[data-testid="stMetric"] {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(15, 23, 42, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.08);
-        padding: 12px 16px;
-        border-radius: 8px;
+        padding: 14px 16px;
+        border-radius: 10px;
     }
     
     div[data-testid="stMetricLabel"] {
-        font-size: 0.8rem !important;
+        font-size: 0.75rem !important;
+        font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.08em;
         color: #94a3b8 !important;
     }
 
     div[data-testid="stMetricValue"] {
-        font-size: 1.4rem !important;
-        font-weight: 700 !important;
+        font-size: 1.35rem !important;
+        font-weight: 800 !important;
+        color: #f8fafc !important;
     }
 
-    /* Responsive adjustments for Mobile */
+    /* Mobile Adaptations */
     @media (max-width: 768px) {
         .main .block-container {
-            padding-left: 0.8rem !important;
-            padding-right: 0.8rem !important;
+            padding-left: 0.75rem !important;
+            padding-right: 0.75rem !important;
             padding-top: 1rem !important;
         }
 
         .hero-header {
             flex-direction: column;
             text-align: center;
-            padding: 1.25rem 1rem;
-            gap: 0.75rem;
+            padding: 1.5rem 1rem;
+            gap: 1rem;
         }
 
         .hero-logo {
-            width: 65px;
-            height: 65px;
+            width: 75px;
+            height: 75px;
         }
 
-        .hero-title-container h1 {
+        .hero-title {
             font-size: 1.6rem !important;
         }
 
@@ -401,31 +417,33 @@ league = div.get(4, empty_df())
 all_nonempty = [x for x in div.values() if not x.empty]
 all_div = pd.concat(all_nonempty, ignore_index=True) if all_nonempty else empty_df()
 
-# Professional Hero Banner
+# Professional Glassmorphism Banner
 st.markdown(f"""
     <div class="hero-header">
-        <img src="{CLUB_LOGO_URL}" class="hero-logo" onerror="this.onerror=null; this.src='https://img.icons8.com/color/96/football-shirt.png';">
-        <div class="hero-title-container">
-            <h1>BISHOPTON FC BLACK 2014</h1>
-            <p>Official Match Centre & Performance Hub</p>
+        <div class="hero-logo-container">
+            <img src="{CLUB_LOGO_URL}" class="hero-logo" onerror="this.onerror=null; this.src='https://img.icons8.com/color/96/football-shirt.png';">
+        </div>
+        <div class="hero-text">
+            <h1 class="hero-title">Bishopton FC Black 2014</h1>
+            <p class="hero-subtitle">Official Match Centre & Analytical Hub</p>
         </div>
     </div>
 """, unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("⚙️ Controls")
-    if st.button("🔄 Refresh Match Data", use_container_width=True):
+    st.header("⚙️ App Controls")
+    if st.button("🔄 Sync Live Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    with st.expander("System Diagnostics"):
-        st.caption(f"Engine Build: {APP_CACHE_VERSION}")
+    with st.expander("System Engine"):
+        st.caption(f"Build Version: {APP_CACHE_VERSION}")
         for item in diagnostics:
             st.write(item)
 
 col_fx, col_tbl = st.columns([1, 1])
 
 with col_fx:
-    st.subheader("📅 Fixtures & Results")
+    st.subheader("⚽ League Fixtures & Results")
     if league.empty:
         st.info("No Division 4 fixtures currently loaded.")
     else:
@@ -433,7 +451,7 @@ with col_fx:
         upcoming = fx[fx.status != "FT"]
         completed = fx[fx.status == "FT"]
 
-        st.markdown("##### Next Match")
+        st.markdown("##### Next Fixture")
         if upcoming.empty:
             st.caption("No upcoming league fixtures scheduled.")
         else:
@@ -445,11 +463,11 @@ with col_fx:
                 with st.container(border=True):
                     st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{venue}*")
                     st.markdown(f"### **Bishopton FC** vs **{opp}**")
-                    st.caption(f"Status: **{r['status']}**")
+                    st.caption(f"Status / Kick-off: **{r['status']}**")
                     if p is not None:
-                        st.caption(f"Probability Index: **{p:.0%}** Win Expectancy")
+                        st.caption(f"Win Probability Model: **{p:.0%}** Expectancy")
                     
-                    with st.expander("Form & Tactical Comparison"):
+                    with st.expander("Tactical Form Comparison"):
                         ca, cb = st.columns(2)
                         with ca:
                             st.write("**Bishopton FC**")
@@ -470,7 +488,7 @@ with col_fx:
                     st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
 
 with col_tbl:
-    st.subheader("📊 Division 4 League Table")
+    st.subheader("📊 Division 4 Standings")
     ot, ot_url = official_table()
     tbl_data = ot if ot is not None else calculated_table(league)
     
@@ -481,9 +499,9 @@ with col_tbl:
         height=480
     )
     if ot is not None:
-        st.caption(f"Verified source: PJDYFL Feed")
+        st.caption("Source: Verified PJDYFL Feed")
     else:
-        st.caption("Dynamic standings calculated from match performance.")
+        st.caption("Calculated live standings from parser feed.")
 
 st.divider()
 st.header("🏆 Cup Competitions")
@@ -511,7 +529,7 @@ for cup_name, cdf in cups.items():
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
                 c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
-                c3.metric("Win Expectancy", f"{p:.0%}" if p is not None else "N/A")
+                c3.metric("Win Probability", f"{p:.0%}" if p is not None else "N/A")
 
                 with st.expander("Opponent Form Breakdown"):
                     if orr.empty:
