@@ -5,11 +5,11 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.5.0"
+APP_CACHE_VERSION = "v1.6.0"
 
-# Direct Stream / Raw Image Link constructed from Google Drive File ID
-FILE_ID = "1XiqwuKz-l6ILUb_7iPrq15yjheEijJ1-"
-CLUB_LOGO_URL = f"https://drive.google.com/file/d/1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv/view?usp=drivesdk"
+# Direct Stream / Raw Image Link using updated Transparent Badge ID
+FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
+CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
@@ -438,7 +438,7 @@ league = div.get(4, empty_df())
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Banner
+# Header Banner with updated Transparent Badge
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
@@ -474,7 +474,6 @@ with col_fx:
         if upcoming_all.empty:
             st.caption("No upcoming matches scheduled.")
         else:
-            # Highlight absolute next match across all competitions (e.g. Scottish Cup)
             render_fixture_card(upcoming_all.iloc[0], all_fixtures_df)
 
         st.markdown("##### Recent Results")
@@ -518,7 +517,6 @@ else:
     if upcoming_league.empty:
         st.caption("No upcoming Division 4 league fixtures registered.")
     else:
-        # Initial 5 games display
         initial_five = upcoming_league.head(5)
         remaining_games = upcoming_league.iloc[5:]
 
