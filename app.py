@@ -5,9 +5,42 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.0.9"
+APP_CACHE_VERSION = "v1.1.0"
 
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
+
+# CSS for Responsive Mobile Viewports (iPhones & Small Screens)
+st.markdown("""
+    <style>
+    @media (max-width: 768px) {
+        /* Reduce side padding on smaller screens */
+        .main .block-container {
+            padding-left: 0.6rem !important;
+            padding-right: 0.6rem !important;
+            padding-top: 1rem !important;
+        }
+        
+        /* Enable smooth horizontal scrolling for stand-alone data tables */
+        div[data-testid="stDataFrame"] {
+            width: 100% !important;
+            overflow-x: auto !important;
+        }
+
+        /* Compact styling for metric blocks in Cup sections */
+        div[data-testid="stMetric"] {
+            background-color: rgba(125, 125, 125, 0.08);
+            padding: 6px 10px;
+            border-radius: 6px;
+            margin-bottom: 6px;
+        }
+        
+        /* Streamline container card padding */
+        div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
+            padding: 0.2rem 0;
+        }
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 BASE = "https://www.pjdyfl.co.uk"
 DIV_URLS = {i: f"{BASE}/2014-division-{i}" for i in range(1, 5)}
@@ -33,14 +66,12 @@ def clean_team_name(text):
     """Strips scores, times, venues, and round headers to extract valid team names."""
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     
-    # Reject strings that contain phrase artifacts or score blocks
     if re.search(r"Half time|Kick off|Full time|Round:|P-P", text, re.I):
         return ""
     
-    # Remove leading round numbers, times, and dates
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
-    text = re.sub(r"\b\d{1,2}\s+\d{1,2}\b", "", text) # Removes trailing digits like "3 2"
+    text = re.sub(r"\b\d{1,2}\s+\d{1,2}\b", "", text)
     
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
@@ -54,7 +85,6 @@ def clean_team_name(text):
 
     text = text.strip(" -–:")
     
-    # Validation check: A real team name shouldn't be overly long or contain score patterns
     if len(text) > 45 or re.search(r"\d+\s*-\s*\d+", text):
         return ""
         
@@ -120,7 +150,6 @@ def parse_matches(url, competition):
         if not current_date:
             continue
 
-        # Completed Match (e.g., Team A 3 - 2 Team B)
         m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d{1,2})\s*[-–]\s*(?P<ag>\d{1,2})\s+(?P<away>.+?)$", text)
         if not m:
             m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d{1,2})\s+(?P<ag>\d{1,2})\s+(?P<away>.+?)$", text)
@@ -133,7 +162,6 @@ def parse_matches(url, competition):
                                 hg=hg, ag=ag, status="FT", competition=competition))
                 continue
 
-        # Scheduled Match (e.g., Team A 09:00 Team B)
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
         if m:
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
@@ -142,7 +170,6 @@ def parse_matches(url, competition):
                                 hg=None, ag=None, status=m.group("kick"), competition=competition))
                 continue
 
-        # Postponed Match
         m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
         if m:
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
@@ -228,7 +255,6 @@ def calculated_table(df):
     if df.empty or not {"home", "away"}.issubset(df.columns):
         return pd.DataFrame(columns=cols)
 
-    # Collect valid team names only
     raw_teams = list(df.home.dropna()) + list(df.away.dropna())
     valid_teams = sorted(list(set([t for t in [clean_team_name(x) for x in raw_teams] if t])))
     
@@ -263,7 +289,6 @@ def official_table(_v=APP_CACHE_VERSION):
                 if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
                     team_col = [c for c in t.columns if "club" in str(c).lower() or "team" in str(c).lower()][0]
                     t[team_col] = t[team_col].apply(clean_team_name)
-                    # Filter out empty or bad rows from the parsed official table
                     t = t[t[team_col] != ""].reset_index(drop=True)
                     return t, url
         except Exception:
@@ -353,7 +378,7 @@ with col_tbl:
         tbl_data,
         hide_index=True,
         use_container_width=True,
-        height=600
+        height=500
     )
     if ot is not None:
         st.caption(f"Official PJDYFL table source: {ot_url}")
