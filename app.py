@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.6.0"
+APP_CACHE_VERSION = "v1.7.0"
 
 # Direct Stream / Raw Image Link using updated Transparent Badge ID
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
@@ -54,21 +54,19 @@ st.markdown("""
 
     .hero-logo-container {
         flex-shrink: 0;
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 12px;
-        padding: 8px;
+        background: transparent;
+        border: none;
+        padding: 0;
         display: flex;
         align-items: center;
         justify-content: center;
-        backdrop-filter: blur(8px);
     }
 
     .hero-logo {
-        width: 95px;
-        height: 95px;
+        width: 130px;
+        height: 130px;
         object-fit: contain;
-        filter: drop-shadow(0 4px 10px rgba(0,0,0,0.4));
+        filter: drop-shadow(0 6px 14px rgba(0,0,0,0.5));
     }
 
     .hero-text {
@@ -130,8 +128,8 @@ st.markdown("""
         }
 
         .hero-logo {
-            width: 75px;
-            height: 75px;
+            width: 100px;
+            height: 100px;
         }
 
         .hero-title {
@@ -438,7 +436,7 @@ league = div.get(4, empty_df())
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Header Banner with updated Transparent Badge
+# Header Banner with enlarged, borderless transparent badge
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
