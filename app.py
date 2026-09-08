@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.3.0"
+APP_CACHE_VERSION = "v1.4.0"
 
 # Direct Stream / Raw Image Link constructed from Google Drive File ID
 FILE_ID = "1XiqwuKz-l6ILUb_7iPrq15yjheEijJ1-"
@@ -32,14 +32,12 @@ st.markdown("""
         letter-spacing: -0.03em;
     }
 
-    /* Container Layout */
     .main .block-container {
         padding-top: 1.5rem !important;
         padding-bottom: 2.5rem !important;
         max-width: 1240px;
     }
 
-    /* Modern Glassmorphic Hero Banner */
     .hero-header {
         background: linear-gradient(135deg, #09131e 0%, #112233 60%, #1a3a5c 100%);
         border-radius: 16px;
@@ -96,7 +94,6 @@ st.markdown("""
         text-transform: uppercase;
     }
 
-    /* Custom Cards & Metrics Styling */
     div[data-testid="stMetric"] {
         background: rgba(15, 23, 42, 0.6);
         border: 1px solid rgba(255, 255, 255, 0.08);
@@ -118,7 +115,6 @@ st.markdown("""
         color: #f8fafc !important;
     }
 
-    /* Mobile Adaptations */
     @media (max-width: 768px) {
         .main .block-container {
             padding-left: 0.75rem !important;
@@ -178,21 +174,21 @@ def clean_team_name(text):
     
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
-    text = re.sub(r"\b\d{1,2}\s+\d{1,2}\b", "", text)
     
+    # Updated: Remove exact match ground names while preserving club names like "Gleniffer Thistle"
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
         "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
         "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE",
         "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
-        "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
+        "Clydebank Leisure Centre", "Paisley Grammar School"
     ]
     for v in sorted(venues, key=len, reverse=True):
         text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
 
     text = text.strip(" -–:")
     
-    if len(text) > 45 or re.search(r"\d+\s*-\s*\d+", text):
+    if len(text) > 55 or re.search(r"\d+\s*-\s*\d+", text):
         return ""
         
     return text
@@ -239,7 +235,7 @@ def parse_matches(url, competition):
     out = []
 
     current_date = None
-    current_round = "League/Cup"
+    current_round = competition
 
     for element in soup.find_all(['div', 'tr', 'li', 'p']):
         text = re.sub(r"\s+", " ", element.get_text(" ", strip=True)).strip()
@@ -251,7 +247,7 @@ def parse_matches(url, competition):
                 current_date = parsed_dt
             rnd_match = re.search(r"Round:\s*([^\s]+)", text, re.I)
             if rnd_match:
-                current_round = rnd_match.group(1)
+                current_round = f"{competition} ({rnd_match.group(1)})"
             continue
 
         if not current_date:
@@ -414,10 +410,12 @@ def format_form_df(df_in, display_cols):
 
 div, cups, diagnostics = load_data()
 league = div.get(4, empty_df())
-all_nonempty = [x for x in div.values() if not x.empty]
-all_div = pd.concat(all_nonempty, ignore_index=True) if all_nonempty else empty_df()
 
-# Professional Glassmorphism Banner
+# Combine ALL competitions (League + Cups) for unified fixture tracking
+all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
+all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
+
+# Professional Hero Banner
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
@@ -443,48 +441,51 @@ with st.sidebar:
 col_fx, col_tbl = st.columns([1, 1])
 
 with col_fx:
-    st.subheader("⚽ League Fixtures & Results")
-    if league.empty:
-        st.info("No Division 4 fixtures currently loaded.")
+    st.subheader("⚽ Upcoming Fixtures & Results")
+    if all_fixtures_df.empty:
+        st.info("No match data currently loaded.")
     else:
-        fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
+        fx = all_fixtures_df[all_fixtures_df.home.map(istarget) | all_fixtures_df.away.map(istarget)].sort_values("date")
         upcoming = fx[fx.status != "FT"]
         completed = fx[fx.status == "FT"]
 
-        st.markdown("##### Next Fixture")
+        st.markdown("##### Next Match (All Competitions)")
         if upcoming.empty:
-            st.caption("No upcoming league fixtures scheduled.")
+            st.caption("No upcoming matches scheduled.")
         else:
-            for _, r in upcoming.iterrows():
-                opp = r["away"] if istarget(r["home"]) else r["home"]
-                venue = "Home" if istarget(r["home"]) else "Away"
-                br, orr = form(league, "Bishopton FC Black"), form(league, opp)
-                p = win_chance(br, orr, istarget(r["home"]))
-                with st.container(border=True):
-                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{venue}*")
-                    st.markdown(f"### **Bishopton FC** vs **{opp}**")
-                    st.caption(f"Status / Kick-off: **{r['status']}**")
-                    if p is not None:
-                        st.caption(f"Win Probability Model: **{p:.0%}** Expectancy")
-                    
-                    with st.expander("Tactical Form Comparison"):
-                        ca, cb = st.columns(2)
-                        with ca:
-                            st.write("**Bishopton FC**")
-                            st.dataframe(format_form_df(br, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
-                        with cb:
-                            st.write(f"**{opp}**")
-                            st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
+            # Display next immediate match regardless of competition
+            next_m = upcoming.iloc[0]
+            opp = next_m["away"] if istarget(next_m["home"]) else next_m["home"]
+            venue = "Home" if istarget(next_m["home"]) else "Away"
+            comp = next_m["competition"]
+            br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
+            p = win_chance(br, orr, istarget(next_m["home"]))
+            
+            with st.container(border=True):
+                st.markdown(f"**{next_m['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
+                st.markdown(f"### **Bishopton FC** vs **{opp}**")
+                st.caption(f"Status / Kick-off: **{next_m['status']}**")
+                if p is not None:
+                    st.caption(f"Win Probability Model: **{p:.0%}** Expectancy")
+                
+                with st.expander("Tactical Form Comparison"):
+                    ca, cb = st.columns(2)
+                    with ca:
+                        st.write("**Bishopton FC**")
+                        st.dataframe(format_form_df(br, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
+                    with cb:
+                        st.write(f"**{opp}**")
+                        st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
 
         st.markdown("##### Recent Results")
         if completed.empty:
             st.caption("No completed results recorded yet.")
         else:
-            for _, r in completed.iterrows():
+            for _, r in completed.head(5).iterrows():
                 opp = r["away"] if istarget(r["home"]) else r["home"]
                 score = f"{int(r['hg'])} - {int(r['ag'])}"
                 with st.container(border=True):
-                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}**")
+                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}*")
                     st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
 
 with col_tbl:
@@ -519,7 +520,7 @@ for cup_name, cdf in cups.items():
             venue = "Home" if istarget(r["home"]) else "Away"
             round_label = str(r["round"]) if "round" in r else "Cup Round"
             status_str = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
-            br, orr = form(all_div, "Bishopton FC Black"), form(all_div, opp)
+            br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
             p = win_chance(br, orr, istarget(r["home"]))
             
             with st.container(border=True):
