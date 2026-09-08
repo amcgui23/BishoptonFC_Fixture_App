@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.4.0"
+APP_CACHE_VERSION = "v1.5.0"
 
 # Direct Stream / Raw Image Link constructed from Google Drive File ID
 FILE_ID = "1XiqwuKz-l6ILUb_7iPrq15yjheEijJ1-"
@@ -175,7 +175,6 @@ def clean_team_name(text):
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
     
-    # Updated: Remove exact match ground names while preserving club names like "Gleniffer Thistle"
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
         "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
@@ -408,14 +407,38 @@ def format_form_df(df_in, display_cols):
     return df_out
 
 
+def render_fixture_card(r, all_fixtures_df):
+    opp = r["away"] if istarget(r["home"]) else r["home"]
+    venue = "Home" if istarget(r["home"]) else "Away"
+    comp = r["competition"]
+    br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
+    p = win_chance(br, orr, istarget(r["home"]))
+    status_display = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
+
+    with st.container(border=True):
+        st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
+        st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_display}`")
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
+        c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
+        c3.metric("Win Probability", f"{p:.0%}" if p is not None else "N/A")
+
+        with st.expander("Tactical Form Breakdown"):
+            if orr.empty:
+                st.write("No recorded games for this opponent.")
+            else:
+                st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
+
+
 div, cups, diagnostics = load_data()
 league = div.get(4, empty_df())
 
-# Combine ALL competitions (League + Cups) for unified fixture tracking
+# Combine ALL competitions for form & strength calculations
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Professional Hero Banner
+# Banner
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
@@ -441,47 +464,25 @@ with st.sidebar:
 col_fx, col_tbl = st.columns([1, 1])
 
 with col_fx:
-    st.subheader("⚽ Upcoming Fixtures & Results")
+    st.subheader("⚽ Next Immediate Match")
     if all_fixtures_df.empty:
         st.info("No match data currently loaded.")
     else:
-        fx = all_fixtures_df[all_fixtures_df.home.map(istarget) | all_fixtures_df.away.map(istarget)].sort_values("date")
-        upcoming = fx[fx.status != "FT"]
-        completed = fx[fx.status == "FT"]
+        fx_all = all_fixtures_df[all_fixtures_df.home.map(istarget) | all_fixtures_df.away.map(istarget)].sort_values("date")
+        upcoming_all = fx_all[fx_all.status != "FT"]
 
-        st.markdown("##### Next Match (All Competitions)")
-        if upcoming.empty:
+        if upcoming_all.empty:
             st.caption("No upcoming matches scheduled.")
         else:
-            # Display next immediate match regardless of competition
-            next_m = upcoming.iloc[0]
-            opp = next_m["away"] if istarget(next_m["home"]) else next_m["home"]
-            venue = "Home" if istarget(next_m["home"]) else "Away"
-            comp = next_m["competition"]
-            br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
-            p = win_chance(br, orr, istarget(next_m["home"]))
-            
-            with st.container(border=True):
-                st.markdown(f"**{next_m['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
-                st.markdown(f"### **Bishopton FC** vs **{opp}**")
-                st.caption(f"Status / Kick-off: **{next_m['status']}**")
-                if p is not None:
-                    st.caption(f"Win Probability Model: **{p:.0%}** Expectancy")
-                
-                with st.expander("Tactical Form Comparison"):
-                    ca, cb = st.columns(2)
-                    with ca:
-                        st.write("**Bishopton FC**")
-                        st.dataframe(format_form_df(br, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
-                    with cb:
-                        st.write(f"**{opp}**")
-                        st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
+            # Highlight absolute next match across all competitions (e.g. Scottish Cup)
+            render_fixture_card(upcoming_all.iloc[0], all_fixtures_df)
 
         st.markdown("##### Recent Results")
-        if completed.empty:
+        completed_all = fx_all[fx_all.status == "FT"].sort_values("date", ascending=False)
+        if completed_all.empty:
             st.caption("No completed results recorded yet.")
         else:
-            for _, r in completed.head(5).iterrows():
+            for _, r in completed_all.head(3).iterrows():
                 opp = r["away"] if istarget(r["home"]) else r["home"]
                 score = f"{int(r['hg'])} - {int(r['ag'])}"
                 with st.container(border=True):
@@ -505,6 +506,33 @@ with col_tbl:
         st.caption("Calculated live standings from parser feed.")
 
 st.divider()
+
+# Upcoming Division 4 Schedule Section
+st.header("📅 Division 4 Schedule")
+if league.empty:
+    st.info("No Division 4 league fixtures available.")
+else:
+    league_fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
+    upcoming_league = league_fx[league_fx.status != "FT"]
+    
+    if upcoming_league.empty:
+        st.caption("No upcoming Division 4 league fixtures registered.")
+    else:
+        # Initial 5 games display
+        initial_five = upcoming_league.head(5)
+        remaining_games = upcoming_league.iloc[5:]
+
+        for _, r in initial_five.iterrows():
+            render_fixture_card(r, all_fixtures_df)
+
+        if not remaining_games.empty:
+            with st.expander(f"➕ Show More Upcoming League Fixtures ({len(remaining_games)} remaining)"):
+                for _, r in remaining_games.iterrows():
+                    render_fixture_card(r, all_fixtures_df)
+
+st.divider()
+
+# Cup Competitions Section
 st.header("🏆 Cup Competitions")
 
 cup_found = False
@@ -516,27 +544,7 @@ for cup_name, cdf in cups.items():
         cup_found = True
         st.subheader(cup_name)
         for _, r in cfx.iterrows():
-            opp = r["away"] if istarget(r["home"]) else r["home"]
-            venue = "Home" if istarget(r["home"]) else "Away"
-            round_label = str(r["round"]) if "round" in r else "Cup Round"
-            status_str = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
-            br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
-            p = win_chance(br, orr, istarget(r["home"]))
-            
-            with st.container(border=True):
-                st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** ({round_label}) • *{venue}*")
-                st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_str}`")
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
-                c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
-                c3.metric("Win Probability", f"{p:.0%}" if p is not None else "N/A")
-
-                with st.expander("Opponent Form Breakdown"):
-                    if orr.empty:
-                        st.write("No recorded games for this opponent.")
-                    else:
-                        st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
+            render_fixture_card(r, all_fixtures_df)
 
 if not cup_found:
     st.info("No Cup fixtures currently registered for Bishopton FC Black.")
