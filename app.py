@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.0.5"
+APP_CACHE_VERSION = "v1.0.6"
 
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
@@ -30,7 +30,10 @@ def empty_df():
 
 
 def clean(x):
-    return re.sub(r"\s+", " ", str(x or "")).strip()
+    text = re.sub(r"\s+", " ", str(x or "")).strip()
+    # Strip away Round/Week artifacts from team names
+    text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
+    return text.strip()
 
 
 def norm(x):
@@ -45,7 +48,6 @@ def istarget(x):
 def ordinal_date(s):
     s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", clean(s))
     s = re.sub(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s*", "", s, flags=re.I)
-    
     for f in ("%d %B %Y", "%d %b %Y", "%d %B", "%d %b"):
         try:
             dt = datetime.strptime(s, f)
@@ -66,7 +68,7 @@ def fetch(url, _v=APP_CACHE_VERSION):
         return 404, url, ""
 
 
-def strip_venue(text, leading=True):
+def strip_venue(text):
     text = clean(text)
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
@@ -75,45 +77,9 @@ def strip_venue(text, leading=True):
         "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
         "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
     ]
-    if leading:
-        for v in sorted(venues, key=len, reverse=True):
-            if re.match(r"^" + re.escape(v) + r"\b", text, re.I):
-                return clean(text[len(v):])
-    else:
-        for v in sorted(venues, key=len, reverse=True):
-            text = re.sub(r"\s*" + re.escape(v) + r"\s*$", "", text, flags=re.I)
+    for v in sorted(venues, key=len, reverse=True):
+        text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
     return clean(text)
-
-
-def parse_match_segment(seg, date, rnd, competition):
-    seg = clean(seg)
-    if not seg or not date:
-        return None
-
-    m = re.search(r"(?P<home>.+?)\s+(?P<hg>\d+)\s*[-–]\s*(?P<ag>\d+)\s+(?P<away>.+?)(?:\s+Half time|\s+Kick off|$)", seg, re.I)
-    if not m:
-        m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)(?:\s+Half time|\s+Kick off|$)", seg, re.I)
-    if m:
-        h, a = strip_venue(m.group("home"), True), strip_venue(m.group("away"), False)
-        if h and a:
-            return dict(date=date, round=rnd, home=h, away=a,
-                        hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT",
-                        competition=competition)
-
-    m = re.search(r"(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", seg, re.I)
-    if m:
-        h, a = strip_venue(m.group("home"), True), strip_venue(m.group("away"), False)
-        if h and a:
-            return dict(date=date, round=rnd, home=h, away=a,
-                        hg=None, ag=None, status="Postponed", competition=competition)
-
-    m = re.search(r"(?P<home>.+?)\s*(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", seg)
-    if m:
-        h, a = strip_venue(m.group("home"), True), strip_venue(m.group("away"), False)
-        if h and a:
-            return dict(date=date, round=rnd, home=h, away=a,
-                        hg=None, ag=None, status=m.group("kick"), competition=competition)
-    return None
 
 
 def parse_matches(url, competition):
@@ -122,24 +88,56 @@ def parse_matches(url, competition):
         return empty_df(), {"url": final_url, "http": status, "parsed": 0}
 
     soup = BeautifulSoup(html, "html.parser")
-    text = clean(soup.get_text(" ", strip=True))
-    
-    date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", re.I)
-    dates = list(date_re.finditer(text))
     out = []
 
-    for i, dm in enumerate(dates):
-        date = ordinal_date(dm.group(0))
-        block_end = dates[i + 1].start() if i + 1 < len(dates) else len(text)
-        block = text[dm.end():block_end]
-        rm = re.search(r"Round:\s*([^\s]+)", block, re.I)
-        rnd = rm.group(1) if rm else "League/Cup"
+    # Process match blocks row-by-row instead of full-page text regex
+    current_date = None
+    current_round = "League/Cup"
 
-        parts = re.split(r"(?:Kick off time:|Half time score:)", block, flags=re.I)
-        for seg in parts:
-            parsed = parse_match_segment(seg, date, rnd, competition)
-            if parsed:
-                out.append(parsed)
+    for element in soup.find_all(['div', 'tr', 'li', 'p']):
+        text = clean(element.get_text(" ", strip=True))
+        
+        # Check if element contains a date header
+        date_match = re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", text, re.I)
+        if date_match and len(text) < 60:
+            parsed_dt = ordinal_date(date_match.group(0))
+            if parsed_dt:
+                current_date = parsed_dt
+            rnd_match = re.search(r"Round:\s*([^\s]+)", text, re.I)
+            if rnd_match:
+                current_round = rnd_match.group(1)
+            continue
+
+        if not current_date:
+            continue
+
+        # Finished Match (e.g., Team A 3 - 2 Team B or Team A 3 2 Team B)
+        m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d+)\s*[-–]\s*(?P<ag>\d+)\s+(?P<away>.+?)$", text)
+        if not m:
+            m = re.search(r"^(?P<home>[A-Za-z\s()0-9.-]+?)\s+(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>[A-Za-z\s()0-9.-]+?)$", text)
+        if m:
+            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
+            if h and a and h != a and len(h) < 60 and len(a) < 60:
+                out.append(dict(date=current_date, round=current_round, home=h, away=a,
+                                hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT", competition=competition))
+                continue
+
+        # Scheduled Match (e.g., Team A 09:00 Team B)
+        m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
+        if m:
+            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
+            if h and a and h != a and len(h) < 60 and len(a) < 60:
+                out.append(dict(date=current_date, round=current_round, home=h, away=a,
+                                hg=None, ag=None, status=m.group("kick"), competition=competition))
+                continue
+
+        # Postponed Match (e.g., Team A P-P Team B)
+        m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
+        if m:
+            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
+            if h and a and h != a and len(h) < 60 and len(a) < 60:
+                out.append(dict(date=current_date, round=current_round, home=h, away=a,
+                                hg=None, ag=None, status="Postponed", competition=competition))
 
     info = {"url": final_url, "http": status, "parsed": len(out)}
     if not out:
@@ -231,7 +229,9 @@ def calculated_table(df):
         gd = gf - ga
         pts = 3 * w + d
         rows.append([t, len(r), w, d, l, gf, ga, gd, pts])
-    return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
+    df_out = pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
+    df_out["Team"] = df_out["Team"].apply(clean)
+    return df_out
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -244,6 +244,9 @@ def official_table(_v=APP_CACHE_VERSION):
                 cols = [str(c).strip().lower() for c in t.columns]
                 joined = " ".join(cols)
                 if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
+                    # Clean team column header and artifacts
+                    team_col = [c for c in t.columns if "club" in str(c).lower() or "team" in str(c).lower()][0]
+                    t[team_col] = t[team_col].apply(clean)
                     return t, url
         except Exception:
             continue
