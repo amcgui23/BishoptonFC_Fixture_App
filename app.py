@@ -5,38 +5,130 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.1.0"
+APP_CACHE_VERSION = "v1.2.0"
 
-st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
+# Club Logo URL
+CLUB_LOGO_URL = "https://share.google/8jvgxvJ0Lk5gOgmtY"
 
-# CSS for Responsive Mobile Viewports (iPhones & Small Screens)
+st.set_page_config(
+    page_title="Bishopton FC | Official Hub",
+    page_icon="⚽",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Professional Club Modern Design System (CSS Injection)
 st.markdown("""
     <style>
+    /* Global Styling */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    /* Container Spacing */
+    .main .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 1200px;
+    }
+
+    /* Modern Hero Header Container */
+    .hero-header {
+        background: linear-gradient(135deg, #0d1b2a 0%, #1b263b 100%);
+        border-radius: 12px;
+        padding: 1.5rem 2rem;
+        margin-bottom: 2rem;
+        display: flex;
+        align-items: center;
+        gap: 1.5rem;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .hero-logo {
+        width: 80px;
+        height: 80px;
+        object-fit: contain;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 6px;
+    }
+
+    .hero-title-container h1 {
+        color: #ffffff !important;
+        font-weight: 800 !important;
+        font-size: 2.2rem !important;
+        margin: 0 !important;
+        letter-spacing: -0.5px;
+    }
+
+    .hero-title-container p {
+        color: #94a3b8 !important;
+        margin: 0.25rem 0 0 0 !important;
+        font-size: 0.95rem;
+        font-weight: 500;
+    }
+
+    /* Card Containers */
+    div[data-testid="stForm"], div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
+        border-radius: 10px;
+    }
+
+    /* Primary Headers */
+    h2, h3, h4 {
+        font-weight: 700 !important;
+        letter-spacing: -0.3px;
+    }
+
+    /* Custom Metric Styling */
+    div[data-testid="stMetric"] {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 12px 16px;
+        border-radius: 8px;
+    }
+    
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #94a3b8 !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+        font-weight: 700 !important;
+    }
+
+    /* Responsive adjustments for Mobile */
     @media (max-width: 768px) {
-        /* Reduce side padding on smaller screens */
         .main .block-container {
-            padding-left: 0.6rem !important;
-            padding-right: 0.6rem !important;
+            padding-left: 0.8rem !important;
+            padding-right: 0.8rem !important;
             padding-top: 1rem !important;
         }
-        
-        /* Enable smooth horizontal scrolling for stand-alone data tables */
+
+        .hero-header {
+            flex-direction: column;
+            text-align: center;
+            padding: 1.25rem 1rem;
+            gap: 0.75rem;
+        }
+
+        .hero-logo {
+            width: 65px;
+            height: 65px;
+        }
+
+        .hero-title-container h1 {
+            font-size: 1.6rem !important;
+        }
+
         div[data-testid="stDataFrame"] {
             width: 100% !important;
             overflow-x: auto !important;
-        }
-
-        /* Compact styling for metric blocks in Cup sections */
-        div[data-testid="stMetric"] {
-            background-color: rgba(125, 125, 125, 0.08);
-            padding: 6px 10px;
-            border-radius: 6px;
-            margin-bottom: 6px;
-        }
-        
-        /* Streamline container card padding */
-        div[data-testid="stVerticalBlock"] > div[data-testid="stBlock"] {
-            padding: 0.2rem 0;
         }
     }
     </style>
@@ -63,7 +155,6 @@ def empty_df():
 
 
 def clean_team_name(text):
-    """Strips scores, times, venues, and round headers to extract valid team names."""
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     
     if re.search(r"Half time|Kick off|Full time|Round:|P-P", text, re.I):
@@ -310,22 +401,31 @@ league = div.get(4, empty_df())
 all_nonempty = [x for x in div.values() if not x.empty]
 all_div = pd.concat(all_nonempty, ignore_index=True) if all_nonempty else empty_df()
 
-st.title("⚽ Bishopton FC Black 2014")
+# Professional Hero Banner
+st.markdown(f"""
+    <div class="hero-header">
+        <img src="{CLUB_LOGO_URL}" class="hero-logo" onerror="this.onerror=null; this.src='https://img.icons8.com/color/96/football-shirt.png';">
+        <div class="hero-title-container">
+            <h1>BISHOPTON FC BLACK 2014</h1>
+            <p>Official Match Centre & Performance Hub</p>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
 with st.sidebar:
-    st.header("Data Controls")
-    if st.button("🔄 Force Clear & Refresh"):
+    st.header("⚙️ Controls")
+    if st.button("🔄 Refresh Match Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    with st.expander("Diagnostics"):
-        st.caption(f"App Cache Version: {APP_CACHE_VERSION}")
+    with st.expander("System Diagnostics"):
+        st.caption(f"Engine Build: {APP_CACHE_VERSION}")
         for item in diagnostics:
             st.write(item)
 
 col_fx, col_tbl = st.columns([1, 1])
 
 with col_fx:
-    st.subheader("Division 4 Fixtures")
+    st.subheader("📅 Fixtures & Results")
     if league.empty:
         st.info("No Division 4 fixtures currently loaded.")
     else:
@@ -333,7 +433,7 @@ with col_fx:
         upcoming = fx[fx.status != "FT"]
         completed = fx[fx.status == "FT"]
 
-        st.markdown("#### 📅 Upcoming Matches")
+        st.markdown("##### Next Match")
         if upcoming.empty:
             st.caption("No upcoming league fixtures scheduled.")
         else:
@@ -344,12 +444,12 @@ with col_fx:
                 p = win_chance(br, orr, istarget(r["home"]))
                 with st.container(border=True):
                     st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{venue}*")
-                    st.markdown(f"**Bishopton FC Black** vs **{opp}**")
-                    st.caption(f"Kick-off / Status: **{r['status']}**")
+                    st.markdown(f"### **Bishopton FC** vs **{opp}**")
+                    st.caption(f"Status: **{r['status']}**")
                     if p is not None:
-                        st.caption(f"Estimated Win Chance: **{p:.0%}**")
+                        st.caption(f"Probability Index: **{p:.0%}** Win Expectancy")
                     
-                    with st.expander("Form Guide"):
+                    with st.expander("Form & Tactical Comparison"):
                         ca, cb = st.columns(2)
                         with ca:
                             st.write("**Bishopton FC**")
@@ -358,7 +458,7 @@ with col_fx:
                             st.write(f"**{opp}**")
                             st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result"]), hide_index=True, use_container_width=True)
 
-        st.markdown("#### 🏁 Recent Results")
+        st.markdown("##### Recent Results")
         if completed.empty:
             st.caption("No completed results recorded yet.")
         else:
@@ -370,7 +470,7 @@ with col_fx:
                     st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
 
 with col_tbl:
-    st.subheader("Division 4 Standings")
+    st.subheader("📊 Division 4 League Table")
     ot, ot_url = official_table()
     tbl_data = ot if ot is not None else calculated_table(league)
     
@@ -378,12 +478,12 @@ with col_tbl:
         tbl_data,
         hide_index=True,
         use_container_width=True,
-        height=500
+        height=480
     )
     if ot is not None:
-        st.caption(f"Official PJDYFL table source: {ot_url}")
+        st.caption(f"Verified source: PJDYFL Feed")
     else:
-        st.caption("Calculated dynamic standings from parsed Division 4 results.")
+        st.caption("Dynamic standings calculated from match performance.")
 
 st.divider()
 st.header("🏆 Cup Competitions")
@@ -409,15 +509,15 @@ for cup_name, cdf in cups.items():
                 st.markdown(f"**Bishopton FC Black** vs **{opp}** — `{status_str}`")
                 
                 c1, c2, c3 = st.columns(3)
-                c1.metric("Bishopton form", "".join(br.Result.tolist()) if not br.empty else "—")
-                c2.metric("Opponent form", "".join(orr.Result.tolist()) if not orr.empty else "—")
-                c3.metric("Est. Win Chance", f"{p:.0%}" if p is not None else "N/A")
+                c1.metric("Bishopton Form", "".join(br.Result.tolist()) if not br.empty else "—")
+                c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
+                c3.metric("Win Expectancy", f"{p:.0%}" if p is not None else "N/A")
 
-                with st.expander("Opponent Form Guide"):
+                with st.expander("Opponent Form Breakdown"):
                     if orr.empty:
                         st.write("No recorded games for this opponent.")
                     else:
                         st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
 
 if not cup_found:
-    st.info("No Cup fixtures detected for Bishopton FC Black.")
+    st.info("No Cup fixtures currently registered for Bishopton FC Black.")
