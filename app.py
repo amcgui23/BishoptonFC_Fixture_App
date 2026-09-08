@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.0.8"
+APP_CACHE_VERSION = "v1.0.9"
 
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
@@ -30,12 +30,17 @@ def empty_df():
 
 
 def clean_team_name(text):
-    """Aggressively cleans team names to prevent duplicates and noise."""
+    """Strips scores, times, venues, and round headers to extract valid team names."""
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     
-    # Strip dates, rounds, kick-off times, and venues
+    # Reject strings that contain phrase artifacts or score blocks
+    if re.search(r"Half time|Kick off|Full time|Round:|P-P", text, re.I):
+        return ""
+    
+    # Remove leading round numbers, times, and dates
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
+    text = re.sub(r"\b\d{1,2}\s+\d{1,2}\b", "", text) # Removes trailing digits like "3 2"
     
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
@@ -47,8 +52,13 @@ def clean_team_name(text):
     for v in sorted(venues, key=len, reverse=True):
         text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
 
-    # Standardize whitespace and character cases
-    return text.strip()
+    text = text.strip(" -–:")
+    
+    # Validation check: A real team name shouldn't be overly long or contain score patterns
+    if len(text) > 45 or re.search(r"\d+\s*-\s*\d+", text):
+        return ""
+        
+    return text
 
 
 def norm(x):
@@ -110,20 +120,20 @@ def parse_matches(url, competition):
         if not current_date:
             continue
 
-        # Finished Match: Restrict goal range (0-30 max) to prevent timestamp capture
+        # Completed Match (e.g., Team A 3 - 2 Team B)
         m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d{1,2})\s*[-–]\s*(?P<ag>\d{1,2})\s+(?P<away>.+?)$", text)
         if not m:
-            m = re.search(r"^(?P<home>[A-Za-z\s()0-9.-]+?)\s+(?P<hg>\d{1,2})\s+(?P<ag>\d{1,2})\s+(?P<away>[A-Za-z\s()0-9.-]+?)$", text)
+            m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d{1,2})\s+(?P<ag>\d{1,2})\s+(?P<away>.+?)$", text)
+            
         if m:
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
             hg, ag = int(m.group("hg")), int(m.group("ag"))
-            # Sanity check on reasonable youth football scores
-            if h and a and h != a and hg <= 30 and ag <= 30:
+            if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
                                 hg=hg, ag=ag, status="FT", competition=competition))
                 continue
 
-        # Scheduled Match
+        # Scheduled Match (e.g., Team A 09:00 Team B)
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
         if m:
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
@@ -218,11 +228,12 @@ def calculated_table(df):
     if df.empty or not {"home", "away"}.issubset(df.columns):
         return pd.DataFrame(columns=cols)
 
-    # Clean and deduplicate team names across all fixtures
-    teams = sorted(list(set([clean_team_name(t) for t in df.home.dropna()] + [clean_team_name(t) for t in df.away.dropna()])))
-    rows = []
+    # Collect valid team names only
+    raw_teams = list(df.home.dropna()) + list(df.away.dropna())
+    valid_teams = sorted(list(set([t for t in [clean_team_name(x) for x in raw_teams] if t])))
     
-    for t in teams:
+    rows = []
+    for t in valid_teams:
         r = results(df, t)
         if r.empty:
             rows.append([t, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -252,6 +263,8 @@ def official_table(_v=APP_CACHE_VERSION):
                 if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
                     team_col = [c for c in t.columns if "club" in str(c).lower() or "team" in str(c).lower()][0]
                     t[team_col] = t[team_col].apply(clean_team_name)
+                    # Filter out empty or bad rows from the parsed official table
+                    t = t[t[team_col] != ""].reset_index(drop=True)
                     return t, url
         except Exception:
             continue
