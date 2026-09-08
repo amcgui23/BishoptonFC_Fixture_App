@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.7.0"
+APP_CACHE_VERSION = "v1.8.0"
 
 # Direct Stream / Raw Image Link using updated Transparent Badge ID
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
@@ -41,11 +41,11 @@ st.markdown("""
     .hero-header {
         background: linear-gradient(135deg, #09131e 0%, #112233 60%, #1a3a5c 100%);
         border-radius: 16px;
-        padding: 2rem 2.5rem;
+        padding: 2.2rem 2.5rem;
         margin-bottom: 2rem;
         display: flex;
         align-items: center;
-        gap: 2rem;
+        gap: 2.5rem;
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
         border: 1px solid rgba(255, 255, 255, 0.1);
         position: relative;
@@ -63,10 +63,10 @@ st.markdown("""
     }
 
     .hero-logo {
-        width: 130px;
-        height: 130px;
+        width: 180px;
+        height: 180px;
         object-fit: contain;
-        filter: drop-shadow(0 6px 14px rgba(0,0,0,0.5));
+        filter: drop-shadow(0 8px 18px rgba(0,0,0,0.55));
     }
 
     .hero-text {
@@ -77,7 +77,7 @@ st.markdown("""
     .hero-title {
         color: #ffffff !important;
         font-weight: 900 !important;
-        font-size: 2.2rem !important;
+        font-size: 2.4rem !important;
         margin: 0 !important;
         text-transform: uppercase;
         line-height: 1.1;
@@ -85,8 +85,8 @@ st.markdown("""
 
     .hero-subtitle {
         color: #00d2ff !important;
-        margin: 0.4rem 0 0 0 !important;
-        font-size: 0.85rem;
+        margin: 0.5rem 0 0 0 !important;
+        font-size: 0.95rem;
         font-weight: 700;
         letter-spacing: 0.15em;
         text-transform: uppercase;
@@ -124,16 +124,16 @@ st.markdown("""
             flex-direction: column;
             text-align: center;
             padding: 1.5rem 1rem;
-            gap: 1rem;
+            gap: 1.2rem;
         }
 
         .hero-logo {
-            width: 100px;
-            height: 100px;
+            width: 140px;
+            height: 140px;
         }
 
         .hero-title {
-            font-size: 1.6rem !important;
+            font-size: 1.8rem !important;
         }
 
         div[data-testid="stDataFrame"] {
@@ -436,7 +436,7 @@ league = div.get(4, empty_df())
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
 all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
 
-# Header Banner with enlarged, borderless transparent badge
+# Header Banner with significantly larger badge
 st.markdown(f"""
     <div class="hero-header">
         <div class="hero-logo-container">
