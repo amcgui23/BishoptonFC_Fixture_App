@@ -251,8 +251,9 @@ def win_chance(a, b, home=True):
 
 
 def calculated_table(df):
+    cols = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
     if df.empty or not {"home", "away"}.issubset(df.columns):
-        return pd.DataFrame(columns=["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"])
+        return pd.DataFrame(columns=cols)
     teams = set(df.home.dropna()) | set(df.away.dropna())
     rows = []
     for t in teams:
@@ -263,8 +264,12 @@ def calculated_table(df):
         w = (r["Result"] == "W").sum()
         d = (r["Result"] == "D").sum()
         l = (r["Result"] == "L").sum()
-        rows.append([t, len(r), w, d, l, r["GF"].sum(), r["GA"].sum(), r["GD"].sum(), 3*w+d])
-    return pd.DataFrame(rows, columns=["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
+        gf = r["GF"].sum()
+        ga = r["GA"].sum()
+        gd = gf - ga
+        pts = 3 * w + d
+        rows.append([t, len(r), w, d, l, gf, ga, gd, pts])
+    return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -303,41 +308,57 @@ with st.sidebar:
             st.write(item)
 
 st.header("🏆 Division 4")
-st.subheader("Bishopton FC Black fixtures")
-if league.empty:
-    st.error("Could not parse Division 4 fixtures from PJDYFL. Open Data-source diagnostics in the sidebar for details.")
-else:
-    fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
-    for _, r in fx.iterrows():
-        opp = r.away if istarget(r.home) else r.home
-        home = istarget(r.home)
-        score = f"{int(r.hg)}–{int(r.ag)}" if r.status == "FT" else r.status
-        st.markdown(f"### {r.date.strftime('%a %d %b %Y')} — {'Home' if home else 'Away'}")
-        st.markdown(f"**Bishopton FC Black** vs **{opp}** — **{score}**")
-        br, orr = form(league, TARGET), form(league, opp)
-        p = win_chance(br, orr, home)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Bishopton last 5", "".join(br.Result.tolist()) if not br.empty else "—")
-        c2.metric("Opponent last 5", "".join(orr.Result.tolist()) if not orr.empty else "—")
-        c3.metric("Estimated Bishopton win chance", f"{p:.0%}" if p is not None else "N/A")
-        with st.expander("Form guide"):
-            a, b = st.columns(2)
-            with a:
-                st.write("**Bishopton FC Black**")
-                st.dataframe(br[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
-            with b:
-                st.write(f"**{opp}**")
-                st.dataframe(orr[["date", "opponent", "GF", "GA", "Result"]].assign(date=lambda x: x.date.dt.strftime("%d/%m/%Y")), hide_index=True, use_container_width=True)
-        st.divider()
 
-st.subheader("Division 4 League Table")
-ot, ot_url = official_table(4)
-if ot is not None:
-    st.dataframe(ot, hide_index=True, use_container_width=True)
-    st.caption(f"Official PJDYFL league table source: {ot_url}")
-else:
-    st.dataframe(calculated_table(league), hide_index=True, use_container_width=True)
-    st.caption("Fallback table calculated from published Division 4 results because the table feed was not machine-readable.")
+# Layout Split: Fixtures on the left, League Table on the right
+col_fx, col_tbl = st.columns([1, 1])
+
+with col_fx:
+    st.subheader("Bishopton FC Black Fixtures")
+    if league.empty:
+        st.error("Could not parse Division 4 fixtures from PJDYFL.")
+    else:
+        fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
+        
+        # Display Upcoming / Scheduled Fixtures First
+        upcoming_fx = fx[fx.status != "FT"]
+        completed_fx = fx[fx.status == "FT"]
+        
+        if not upcoming_fx.empty:
+            st.markdown("#### 📅 Upcoming Fixtures")
+            for _, r in upcoming_fx.iterrows():
+                opp = r.away if istarget(r.home) else r.home
+                home = istarget(r.home)
+                st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** — {'Home' if home else 'Away'}")
+                st.markdown(f"**Bishopton FC Black** vs **{opp}** ({r.status})")
+                br, orr = form(league, TARGET), form(league, opp)
+                p = win_chance(br, orr, home)
+                st.caption(f"Estimated Win Chance: **{p:.0%}**" if p is not None else "Estimated Win Chance: N/A")
+                st.divider()
+
+        st.markdown("#### 🏁 Completed Results")
+        if completed_fx.empty:
+            st.info("No completed results yet.")
+        else:
+            for _, r in completed_fx.iterrows():
+                opp = r.away if istarget(r.home) else r.home
+                home = istarget(r.home)
+                score = f"{int(r.hg)}–{int(r.ag)}"
+                st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** — {'Home' if home else 'Away'}")
+                st.markdown(f"**Bishopton FC Black** {score} **{opp}**")
+                st.divider()
+
+with col_tbl:
+    st.subheader("Division 4 League Table")
+    ot, ot_url = official_table(4)
+    tbl_data = ot if ot is not None else calculated_table(league)
+    
+    # Render with full height so scrolling is not required
+    st.dataframe(tbl_data, hide_index=True, use_container_width=True, height=600)
+    
+    if ot is not None:
+        st.caption(f"Official PJDYFL table source: {ot_url}")
+    else:
+        st.caption("Fallback table calculated dynamically from parsed Division 4 match scores.")
 
 st.header("🥇 Cup Competitions")
 for cup, cdf in cups.items():
