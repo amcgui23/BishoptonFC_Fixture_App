@@ -98,56 +98,115 @@ def parse_line(line, date, rnd, competition):
     return None
 
 
+def strip_venue(text, leading=True):
+    """Remove common TeamExpert venue text accidentally attached to a match row."""
+    text = clean(text)
+    venues = [
+        "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
+        "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
+        "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE",
+        "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
+        "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
+    ]
+    # Prefer exact known venues, then use conservative generic venue endings.
+    if leading:
+        for v in sorted(venues, key=len, reverse=True):
+            if re.match(r"^" + re.escape(v) + r"\b", text, re.I):
+                return clean(text[len(v):])
+    else:
+        for v in sorted(venues, key=len, reverse=True):
+            text = re.sub(r"\s*" + re.escape(v) + r"\s*$", "", text, flags=re.I)
+    # Generic fallbacks for venue strings that TeamExpert appends without a space.
+    if leading:
+        text = re.sub(r"^(?:[A-Z][A-Za-z'&.-]*(?:\s+[A-Z][A-Za-z'&.-]*){0,5})\s+(?:Park|Pitch|Fields?|Complex|Centre|Center|Astroturf|School)\b", "", text, flags=re.I).strip()
+    else:
+        text = re.sub(r"\s+(?:[A-Z][A-Za-z'&.-]*(?:\s+[A-Z][A-Za-z'&.-]*){0,5})\s+(?:Park|Pitch|Fields?|Complex|Centre|Center|Astroturf|School)\s*$", "", text, flags=re.I).strip()
+    return clean(text)
+
+
+def parse_match_segment(seg, date, rnd, competition):
+    """Parse one match segment immediately before a TeamExpert 'Kick off time' marker."""
+    seg = clean(seg)
+    if not seg or not date:
+        return None
+
+    # Results. The half-time marker gives us an unambiguous row boundary.
+    m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)\s+Half time score:\s*\d+\s*-\s*\d+", seg, re.I)
+    if m:
+        home = strip_venue(m.group("home"), leading=True)
+        away = strip_venue(m.group("away"), leading=False)
+        if home and away and len(home) < 120 and len(away) < 120:
+            return dict(date=date, round=rnd, home=home, away=away,
+                        hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT",
+                        competition=competition)
+
+    # Postponed / abandoned rows.
+    m = re.search(r"(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", seg, re.I)
+    if m:
+        home = strip_venue(m.group("home"), leading=True)
+        away = strip_venue(m.group("away"), leading=False)
+        if home and away and len(home) < 120 and len(away) < 120:
+            return dict(date=date, round=rnd, home=home, away=away,
+                        hg=None, ag=None, status="Postponed", competition=competition)
+
+    # Future fixture. The first HH:MM is the fixture kick-off time; the final
+    # 'Kick off time' marker is stripped before this function is called.
+    m = re.search(r"(?P<home>.+?)(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", seg)
+    if m:
+        home = strip_venue(m.group("home"), leading=True)
+        away = strip_venue(m.group("away"), leading=False)
+        if home and away and len(home) < 120 and len(away) < 120:
+            return dict(date=date, round=rnd, home=home, away=away,
+                        hg=None, ag=None, status=m.group("kick"), competition=competition)
+    return None
+
+
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
     soup = BeautifulSoup(html, "html.parser")
 
-    # stripped_strings is more reliable than get_text("\\n") on TeamExpert pages,
-    # because COMET match rows are made from nested HTML elements.
-    raw = [clean(x) for x in soup.stripped_strings if clean(x)]
-
-    date_re = re.compile(r"^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}(?:st|nd|rd|th)\s+\w+\s+\d{4}$", re.I)
-    round_re = re.compile(r"^Round:\s*(.*)$", re.I)
+    # TeamExpert's match rows are not stable HTML table rows. Depending on the
+    # page, BeautifulSoup may split a single fixture into many text nodes. The
+    # browser-readable page does, however, consistently contain date headings,
+    # Round headings and a 'Kick off time:' marker for every match. We use those
+    # stable markers instead of relying on individual HTML nodes.
+    text = clean(soup.get_text(" ", strip=True))
+    date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}(?:st|nd|rd|th)\s+\w+\s+\d{4}", re.I)
+    dates = list(date_re.finditer(text))
     out = []
-    date = None
-    rnd = ""
 
-    for line in raw:
-        if date_re.match(line):
-            date = ordinal_date(line)
-            rnd = ""
-            continue
-        m = round_re.match(line)
-        if m:
-            rnd = m.group(1)
-            continue
-        if not date:
-            continue
-        parsed = parse_line(line, date, rnd, competition)
-        if parsed:
-            out.append(parsed)
+    for i, dm in enumerate(dates):
+        date = ordinal_date(dm.group(0))
+        block_end = dates[i + 1].start() if i + 1 < len(dates) else len(text)
+        block = text[dm.end():block_end]
+        rm = re.search(r"Round:\s*([^\s]+)", block, re.I)
+        rnd = rm.group(1) if rm else ""
+        if rm:
+            block = block[rm.end():]
 
-    # Second strategy: the browser-readable text representation often joins
-    # adjacent text nodes. Split it around date headings and parse each token.
+        # Every fixture on this site has a final 'Kick off time: HH:MM'.
+        # Splitting on that marker isolates one fixture at a time; the only
+        # complication is that the previous fixture's venue can prefix the next
+        # segment, which strip_venue() handles.
+        parts = re.split(r"Kick off time:\s*\d{1,2}:\d{2}", block, flags=re.I)
+        for seg in parts[:-1]:
+            parsed = parse_match_segment(seg, date, rnd, competition)
+            if parsed:
+                out.append(parsed)
+
+    info = {
+        "url": final_url,
+        "http": status,
+        "text_len": len(html),
+        "raw_nodes": len(list(soup.stripped_strings)),
+        "date_blocks": len(dates),
+        "parsed": len(out),
+    }
     if not out:
-        text = soup.get_text("\n", strip=True)
-        lines = [clean(x) for x in text.splitlines() if clean(x)]
-        date = None
-        rnd = ""
-        for line in lines:
-            if date_re.match(line):
-                date = ordinal_date(line); rnd = ""; continue
-            m = round_re.match(line)
-            if m: rnd = m.group(1); continue
-            parsed = parse_line(line, date, rnd, competition)
-            if parsed: out.append(parsed)
-
-    if not out:
-        return empty_df(), {"url": final_url, "http": status, "text_len": len(html), "raw_nodes": len(raw), "parsed": 0}
-
+        return empty_df(), info
     df = pd.DataFrame(out, columns=COLS).drop_duplicates(["date", "home", "away", "competition", "round"])
     df["date"] = pd.to_datetime(df["date"])
-    return df.sort_values("date").reset_index(drop=True), {"url": final_url, "http": status, "text_len": len(html), "raw_nodes": len(raw), "parsed": len(df)}
+    return df.sort_values("date").reset_index(drop=True), info
 
 
 @st.cache_data(ttl=900, show_spinner=False)
