@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v1.0.7"
+APP_CACHE_VERSION = "v1.0.8"
 
 st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="⚽", layout="wide")
 
@@ -29,14 +29,30 @@ def empty_df():
     return pd.DataFrame(columns=COLS)
 
 
-def clean(x):
-    text = re.sub(r"\s+", " ", str(x or "")).strip()
+def clean_team_name(text):
+    """Aggressively cleans team names to prevent duplicates and noise."""
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    
+    # Strip dates, rounds, kick-off times, and venues
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
+    text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
+    
+    venues = [
+        "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
+        "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
+        "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE",
+        "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
+        "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
+    ]
+    for v in sorted(venues, key=len, reverse=True):
+        text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
+
+    # Standardize whitespace and character cases
     return text.strip()
 
 
 def norm(x):
-    return clean(x).lower()
+    return clean_team_name(x).lower()
 
 
 def istarget(x):
@@ -45,7 +61,7 @@ def istarget(x):
 
 
 def ordinal_date(s):
-    s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", clean(s))
+    s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", str(s).strip())
     s = re.sub(r"^(Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s*", "", s, flags=re.I)
     for f in ("%d %B %Y", "%d %b %Y", "%d %B", "%d %b"):
         try:
@@ -67,20 +83,6 @@ def fetch(url, _v=APP_CACHE_VERSION):
         return 404, url, ""
 
 
-def strip_venue(text):
-    text = clean(text)
-    venues = [
-        "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
-        "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
-        "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE",
-        "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
-        "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
-    ]
-    for v in sorted(venues, key=len, reverse=True):
-        text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
-    return clean(text)
-
-
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
     if status != 200 or not html:
@@ -93,7 +95,7 @@ def parse_matches(url, competition):
     current_round = "League/Cup"
 
     for element in soup.find_all(['div', 'tr', 'li', 'p']):
-        text = clean(element.get_text(" ", strip=True))
+        text = re.sub(r"\s+", " ", element.get_text(" ", strip=True)).strip()
         
         date_match = re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", text, re.I)
         if date_match and len(text) < 60:
@@ -108,22 +110,24 @@ def parse_matches(url, competition):
         if not current_date:
             continue
 
-        # Finished Match
-        m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d+)\s*[-–]\s*(?P<ag>\d+)\s+(?P<away>.+?)$", text)
+        # Finished Match: Restrict goal range (0-30 max) to prevent timestamp capture
+        m = re.search(r"^(?P<home>.+?)\s+(?P<hg>\d{1,2})\s*[-–]\s*(?P<ag>\d{1,2})\s+(?P<away>.+?)$", text)
         if not m:
-            m = re.search(r"^(?P<home>[A-Za-z\s()0-9.-]+?)\s+(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>[A-Za-z\s()0-9.-]+?)$", text)
+            m = re.search(r"^(?P<home>[A-Za-z\s()0-9.-]+?)\s+(?P<hg>\d{1,2})\s+(?P<ag>\d{1,2})\s+(?P<away>[A-Za-z\s()0-9.-]+?)$", text)
         if m:
-            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
-            if h and a and h != a and len(h) < 60 and len(a) < 60:
+            h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
+            hg, ag = int(m.group("hg")), int(m.group("ag"))
+            # Sanity check on reasonable youth football scores
+            if h and a and h != a and hg <= 30 and ag <= 30:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT", competition=competition))
+                                hg=hg, ag=ag, status="FT", competition=competition))
                 continue
 
         # Scheduled Match
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
         if m:
-            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
-            if h and a and h != a and len(h) < 60 and len(a) < 60:
+            h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
+            if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
                                 hg=None, ag=None, status=m.group("kick"), competition=competition))
                 continue
@@ -131,8 +135,8 @@ def parse_matches(url, competition):
         # Postponed Match
         m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
         if m:
-            h, a = strip_venue(m.group("home")), strip_venue(m.group("away"))
-            if h and a and h != a and len(h) < 60 and len(a) < 60:
+            h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
+            if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
                                 hg=None, ag=None, status="Postponed", competition=competition))
 
@@ -171,18 +175,20 @@ def results(df, team):
     if df.empty:
         return pd.DataFrame(columns=cols)
     rows = []
+    norm_team = norm(team)
     for _, r in df.iterrows():
-        if r.status != "FT":
+        if r["status"] != "FT":
             continue
-        if istarget(r.home) if istarget(team) else norm(r.home) == norm(team):
-            gf, ga, opp, venue = int(r.hg), int(r.ag), r.away, "H"
-        elif istarget(r.away) if istarget(team) else norm(r.away) == norm(team):
-            gf, ga, opp, venue = int(r.ag), int(r.hg), r.home, "A"
+        h_norm, a_norm = norm(r["home"]), norm(r["away"])
+        if (istarget(team) and istarget(r["home"])) or h_norm == norm_team:
+            gf, ga, opp, venue = int(r["hg"]), int(r["ag"]), r["away"], "H"
+        elif (istarget(team) and istarget(r["away"])) or a_norm == norm_team:
+            gf, ga, opp, venue = int(r["ag"]), int(r["hg"]), r["home"], "A"
         else:
             continue
-        rows.append({"date": r.date, "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga,
+        rows.append({"date": r["date"], "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga,
                      "Result": "W" if gf > ga else "D" if gf == ga else "L", "venue": venue,
-                     "competition": r.competition})
+                     "competition": r["competition"]})
     return pd.DataFrame(rows, columns=cols).sort_values("date", ascending=False) if rows else pd.DataFrame(columns=cols)
 
 
@@ -211,8 +217,11 @@ def calculated_table(df):
     cols = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
     if df.empty or not {"home", "away"}.issubset(df.columns):
         return pd.DataFrame(columns=cols)
-    teams = set(df.home.dropna()) | set(df.away.dropna())
+
+    # Clean and deduplicate team names across all fixtures
+    teams = sorted(list(set([clean_team_name(t) for t in df.home.dropna()] + [clean_team_name(t) for t in df.away.dropna()])))
     rows = []
+    
     for t in teams:
         r = results(df, t)
         if r.empty:
@@ -226,8 +235,8 @@ def calculated_table(df):
         gd = gf - ga
         pts = 3 * w + d
         rows.append([t, len(r), w, d, l, gf, ga, gd, pts])
+        
     df_out = pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
-    df_out["Team"] = df_out["Team"].apply(clean)
     return df_out
 
 
@@ -242,7 +251,7 @@ def official_table(_v=APP_CACHE_VERSION):
                 joined = " ".join(cols)
                 if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
                     team_col = [c for c in t.columns if "club" in str(c).lower() or "team" in str(c).lower()][0]
-                    t[team_col] = t[team_col].apply(clean)
+                    t[team_col] = t[team_col].apply(clean_team_name)
                     return t, url
         except Exception:
             continue
@@ -291,14 +300,14 @@ with col_fx:
             st.caption("No upcoming league fixtures scheduled.")
         else:
             for _, r in upcoming.iterrows():
-                opp = r.away if istarget(r.home) else r.home
-                venue = "Home" if istarget(r.home) else "Away"
+                opp = r["away"] if istarget(r["home"]) else r["home"]
+                venue = "Home" if istarget(r["home"]) else "Away"
                 br, orr = form(league, "Bishopton FC Black"), form(league, opp)
-                p = win_chance(br, orr, istarget(r.home))
+                p = win_chance(br, orr, istarget(r["home"]))
                 with st.container(border=True):
-                    st.markdown(f"**{r.date.strftime('%a %d %b %Y')}** • *{venue}*")
+                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{venue}*")
                     st.markdown(f"**Bishopton FC Black** vs **{opp}**")
-                    st.caption(f"Kick-off / Status: **{r.status}**")
+                    st.caption(f"Kick-off / Status: **{r['status']}**")
                     if p is not None:
                         st.caption(f"Estimated Win Chance: **{p:.0%}**")
                     
@@ -316,10 +325,10 @@ with col_fx:
             st.caption("No completed results recorded yet.")
         else:
             for _, r in completed.iterrows():
-                opp = r.away if istarget(r.home) else r.home
-                score = f"{int(r.hg)} - {int(r.ag)}"
+                opp = r["away"] if istarget(r["home"]) else r["home"]
+                score = f"{int(r['hg'])} - {int(r['ag'])}"
                 with st.container(border=True):
-                    st.markdown(f"**{r.date.strftime('%a %d %b %Y')}**")
+                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}**")
                     st.markdown(f"**Bishopton FC Black** `{score}` **{opp}**")
 
 with col_tbl:
