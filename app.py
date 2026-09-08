@@ -10,7 +10,6 @@ st.set_page_config(page_title="Bishopton FC Fixture & Form Guide", page_icon="âš
 BASE = "https://www.pjdyfl.co.uk"
 TARGET = "Bishopton FC Black (2014)"
 DIV_URLS = {i: f"{BASE}/2014-division-{i}" for i in range(1, 5)}
-TABLE_URLS = [f"{BASE}/leaguestablefeed/1104", f"{BASE}/leaguetablefeed/1103"]
 CUPS = {
     "Scottish Cup": f"{BASE}/scottish-cup-2014",
     "League Cup": f"{BASE}/league-cup-2014",
@@ -60,8 +59,6 @@ def parse_line(line, date, rnd, competition):
     if not date or not line:
         return None
 
-    # Completed result: the site currently renders e.g.
-    # "Bishopton FC Black (2014)3 2 Bridge of weir United (2014)"
     patterns = [
         r"^(.*?\))\s*(\d+)\s+(\d+)\s+(.*?)(?:\s+Half time score:|\s+Kick off time:|$)",
         r"^(.*?)\s+(\d+)\s+(\d+)\s+(.*?)(?:\s+Half time score:|\s+Kick off time:|$)",
@@ -74,7 +71,6 @@ def parse_line(line, date, rnd, competition):
                 return dict(date=date, round=rnd, home=home, away=away, hg=hg, ag=ag,
                             status="FT", competition=competition)
 
-    # Future fixture: e.g. "Erskine Youth FC (2014)09:00 Bishopton FC Black (2014)"
     patterns = [
         r"^(.*?\))\s*(\d{1,2}:\d{2})\s+(.*?)(?:\s+(?:[A-Z][A-Za-z .&'-]+(?:Community|Park|Centre|Complex|Astroturf|School|Ground|Fields?).*))?$",
         r"^(.*?)\s+(\d{1,2}:\d{2})\s+(.*)$",
@@ -83,13 +79,11 @@ def parse_line(line, date, rnd, competition):
         m = re.match(p, line, re.I)
         if m:
             home, kick, away = clean(m.group(1)), m.group(2), clean(m.group(3))
-            # Remove common venue suffixes where they have been swallowed into away.
             away = re.split(r"\s+(?:Mossedge Community Pitch|Holm Park|India Tyres|Nethercraigs Sport Complex|New Western Park|Millburn Park|Parklea playing fields|Seedhill Playing Fields|Gray Street Astroturf|TORYGLEN FOOTBALL CENTRE|Renfrew Leisure Centre|Williams Street Football Park|Cowan Park.*)$", away, flags=re.I)[0].strip()
             if home and away and len(home) < 120 and len(away) < 120:
                 return dict(date=date, round=rnd, home=home, away=away, hg=None, ag=None,
                             status=kick, competition=competition)
 
-    # Postponed fixtures.
     m = re.match(r"^(.*?)\s+P-P\s+(.*?)(?:\s+Kick off time:.*)?$", line, re.I)
     if m:
         return dict(date=date, round=rnd, home=clean(m.group(1)), away=clean(m.group(2)),
@@ -99,7 +93,6 @@ def parse_line(line, date, rnd, competition):
 
 
 def strip_venue(text, leading=True):
-    """Remove common TeamExpert venue text accidentally attached to a match row."""
     text = clean(text)
     venues = [
         "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
@@ -108,7 +101,6 @@ def strip_venue(text, leading=True):
         "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
         "Clydebank Leisure Centre", "Gleniffer Thistle", "Paisley Grammar School"
     ]
-    # Prefer exact known venues, then use conservative generic venue endings.
     if leading:
         for v in sorted(venues, key=len, reverse=True):
             if re.match(r"^" + re.escape(v) + r"\b", text, re.I):
@@ -116,7 +108,6 @@ def strip_venue(text, leading=True):
     else:
         for v in sorted(venues, key=len, reverse=True):
             text = re.sub(r"\s*" + re.escape(v) + r"\s*$", "", text, flags=re.I)
-    # Generic fallbacks for venue strings that TeamExpert appends without a space.
     if leading:
         text = re.sub(r"^(?:[A-Z][A-Za-z'&.-]*(?:\s+[A-Z][A-Za-z'&.-]*){0,5})\s+(?:Park|Pitch|Fields?|Complex|Centre|Center|Astroturf|School)\b", "", text, flags=re.I).strip()
     else:
@@ -125,12 +116,10 @@ def strip_venue(text, leading=True):
 
 
 def parse_match_segment(seg, date, rnd, competition):
-    """Parse one match segment immediately before a TeamExpert 'Kick off time' marker."""
     seg = clean(seg)
     if not seg or not date:
         return None
 
-    # Results. The half-time marker gives us an unambiguous row boundary.
     m = re.search(r"(?P<home>.+?)(?P<hg>\d+)\s+(?P<ag>\d+)\s+(?P<away>.+?)\s+Half time score:\s*\d+\s*-\s*\d+", seg, re.I)
     if m:
         home = strip_venue(m.group("home"), leading=True)
@@ -140,7 +129,6 @@ def parse_match_segment(seg, date, rnd, competition):
                         hg=int(m.group("hg")), ag=int(m.group("ag")), status="FT",
                         competition=competition)
 
-    # Postponed / abandoned rows.
     m = re.search(r"(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", seg, re.I)
     if m:
         home = strip_venue(m.group("home"), leading=True)
@@ -149,8 +137,6 @@ def parse_match_segment(seg, date, rnd, competition):
             return dict(date=date, round=rnd, home=home, away=away,
                         hg=None, ag=None, status="Postponed", competition=competition)
 
-    # Future fixture. The first HH:MM is the fixture kick-off time; the final
-    # 'Kick off time' marker is stripped before this function is called.
     m = re.search(r"(?P<home>.+?)(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", seg)
     if m:
         home = strip_venue(m.group("home"), leading=True)
@@ -165,11 +151,6 @@ def parse_matches(url, competition):
     status, final_url, html = fetch(url)
     soup = BeautifulSoup(html, "html.parser")
 
-    # TeamExpert's match rows are not stable HTML table rows. Depending on the
-    # page, BeautifulSoup may split a single fixture into many text nodes. The
-    # browser-readable page does, however, consistently contain date headings,
-    # Round headings and a 'Kick off time:' marker for every match. We use those
-    # stable markers instead of relying on individual HTML nodes.
     text = clean(soup.get_text(" ", strip=True))
     date_re = re.compile(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s+\d{1,2}(?:st|nd|rd|th)\s+\w+\s+\d{4}", re.I)
     dates = list(date_re.finditer(text))
@@ -184,10 +165,6 @@ def parse_matches(url, competition):
         if rm:
             block = block[rm.end():]
 
-        # Every fixture on this site has a final 'Kick off time: HH:MM'.
-        # Splitting on that marker isolates one fixture at a time; the only
-        # complication is that the previous fixture's venue can prefix the next
-        # segment, which strip_venue() handles.
         parts = re.split(r"Kick off time:\s*\d{1,2}:\d{2}", block, flags=re.I)
         for seg in parts[:-1]:
             parsed = parse_match_segment(seg, date, rnd, competition)
@@ -232,8 +209,9 @@ def load_data():
 
 
 def results(df, team):
+    cols = ["date", "opponent", "GF", "GA", "GD", "Result", "venue", "competition"]
     if df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=cols)
     rows = []
     target = norm(team)
     for _, r in df.iterrows():
@@ -248,7 +226,7 @@ def results(df, team):
         rows.append({"date": r.date, "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga,
                      "Result": "W" if gf > ga else "D" if gf == ga else "L", "venue": venue,
                      "competition": r.competition})
-    return pd.DataFrame(rows).sort_values("date", ascending=False) if rows else pd.DataFrame()
+    return pd.DataFrame(rows, columns=cols).sort_values("date", ascending=False) if rows else pd.DataFrame(columns=cols)
 
 
 def form(df, team, n=5):
@@ -279,24 +257,31 @@ def calculated_table(df):
     rows = []
     for t in teams:
         r = results(df, t)
-        w, d, l = (r.Result == "W").sum(), (r.Result == "D").sum(), (r.Result == "L").sum()
-        rows.append([t, len(r), w, d, l, r.GF.sum(), r.GA.sum(), r.GD.sum(), 3*w+d])
+        if r.empty:
+            rows.append([t, 0, 0, 0, 0, 0, 0, 0, 0])
+            continue
+        w = (r["Result"] == "W").sum()
+        d = (r["Result"] == "D").sum()
+        l = (r["Result"] == "L").sum()
+        rows.append([t, len(r), w, d, l, r["GF"].sum(), r["GA"].sum(), r["GD"].sum(), 3*w+d])
     return pd.DataFrame(rows, columns=["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def official_table():
-    for url in TABLE_URLS:
-        try:
-            html = fetch(url)[2]
-            tabs = pd.read_html(html)
-            for t in tabs:
-                cols = [str(c).strip().lower() for c in t.columns]
-                joined = " ".join(cols)
-                if len(t) >= 5 and ("club" in joined or "team" in joined) and "pts" in joined:
-                    return t, url
-        except Exception:
-            continue
+def official_table(div_num=4):
+    url = DIV_URLS.get(div_num)
+    if not url:
+        return None, None
+    try:
+        status, final_url, html = fetch(url)
+        tables = pd.read_html(html)
+        for t in tables:
+            cols = [str(c).strip().lower() for c in t.columns]
+            joined = " ".join(cols)
+            if len(t) >= 3 and any(k in joined for k in ["team", "club", "pos", "#"]) and "pts" in joined:
+                return t, final_url
+    except Exception:
+        pass
     return None, None
 
 
@@ -346,7 +331,7 @@ else:
         st.divider()
 
 st.subheader("Division 4 League Table")
-ot, ot_url = official_table()
+ot, ot_url = official_table(4)
 if ot is not None:
     st.dataframe(ot, hide_index=True, use_container_width=True)
     st.caption(f"Official PJDYFL league table source: {ot_url}")
