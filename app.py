@@ -9,7 +9,7 @@ APP_CACHE_VERSION = "v1.5.0"
 
 # Direct Stream / Raw Image Link constructed from Google Drive File ID
 FILE_ID = "1XiqwuKz-l6ILUb_7iPrq15yjheEijJ1-"
-CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
+CLUB_LOGO_URL = f"https://drive.google.com/file/d/1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv/view?usp=drivesdk"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
