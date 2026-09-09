@@ -5,10 +5,11 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v2.0.0"
+APP_CACHE_VERSION = "v2.1.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
+SQUAD_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
@@ -157,8 +158,10 @@ HEADERS = {
 }
 COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition"]
 
+
 def empty_df():
     return pd.DataFrame(columns=COLS)
+
 
 def clean_team_name(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -186,12 +189,15 @@ def clean_team_name(text):
         
     return text
 
+
 def norm(x):
     return clean_team_name(x).lower()
+
 
 def istarget(x):
     n = norm(x)
     return bool(re.search(r"\bbishopton\b.*\bblack\b", n))
+
 
 def ordinal_date(s):
     s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", str(s).strip())
@@ -206,6 +212,7 @@ def ordinal_date(s):
             pass
     return None
 
+
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch(url, _v=APP_CACHE_VERSION):
     try:
@@ -213,6 +220,17 @@ def fetch(url, _v=APP_CACHE_VERSION):
         return r.status_code, r.url, r.text
     except Exception:
         return 404, url, ""
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_squad_data(sheet_url, _v=APP_CACHE_VERSION):
+    try:
+        df = pd.read_csv(sheet_url)
+        df.dropna(how="all", inplace=True)
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
 
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
@@ -275,6 +293,7 @@ def parse_matches(url, competition):
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values("date").reset_index(drop=True), info
 
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data(_v=APP_CACHE_VERSION):
     div, cups, diagnostics = {}, {}, []
@@ -295,6 +314,7 @@ def load_data(_v=APP_CACHE_VERSION):
             cups[n] = empty_df()
             diagnostics.append(f"{n}: ERROR {type(e).__name__}: {e}")
     return div, cups, diagnostics
+
 
 def results(df, team):
     cols = ["date", "opponent", "GF", "GA", "GD", "Result", "venue", "competition"]
@@ -317,8 +337,10 @@ def results(df, team):
                      "competition": r["competition"]})
     return pd.DataFrame(rows, columns=cols).sort_values("date", ascending=False) if rows else pd.DataFrame(columns=cols)
 
+
 def form(df, team, n=5):
     return results(df, team).head(n)
+
 
 def strength(r):
     if r.empty:
@@ -328,12 +350,14 @@ def strength(r):
     recent = r.head(5)
     return .55*ppg(r) + .30*ppg(recent) + .15*(1 + math.tanh(recent.GD.mean()/3))
 
+
 def win_chance(a, b, home=True):
     sa, sb = strength(a), strength(b)
     if sa is None or sb is None:
         return None
     x = sa - sb + (0.18 if home else -0.02)
     return max(.05, min(.95, 1/(1+math.exp(-1.35*x))))
+
 
 def calculated_table(df):
     cols = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
@@ -361,6 +385,7 @@ def calculated_table(df):
     df_out = pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
     return df_out
 
+
 @st.cache_data(ttl=300, show_spinner=False)
 def official_table(_v=APP_CACHE_VERSION):
     for url in TABLE_URLS:
@@ -379,6 +404,7 @@ def official_table(_v=APP_CACHE_VERSION):
             continue
     return None, None
 
+
 def format_form_df(df_in, display_cols):
     if df_in.empty:
         return pd.DataFrame(columns=display_cols)
@@ -386,6 +412,7 @@ def format_form_df(df_in, display_cols):
     if "date" in df_out.columns:
         df_out["date"] = pd.to_datetime(df_out["date"], errors="coerce").dt.strftime("%d/%m")
     return df_out
+
 
 def render_fixture_card(r, all_fixtures_df):
     is_home = istarget(r["home"])
@@ -423,6 +450,7 @@ def render_fixture_card(r, all_fixtures_df):
                 st.write("No recorded games for this opponent.")
             else:
                 st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
+
 
 div, cups, diagnostics = load_data()
 league = div.get(4, empty_df())
@@ -501,6 +529,36 @@ with col_tbl:
         st.caption("Source: Verified PJDYFL Feed")
     else:
         st.caption("Calculated live standings from parser feed.")
+
+st.divider()
+
+# NEW: Player Squad & Individual Statistics Section
+st.header("🏃 Squad Statistics & Performance")
+
+squad_df = fetch_squad_data(SQUAD_SHEET_CSV)
+
+if squad_df.empty:
+    st.warning("Unable to fetch squad data from Google Sheets. Ensure sheet permissions are set to 'Anyone with link can view'.")
+else:
+    # Summary Cards
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Active Players", len(squad_df))
+    
+    # Try finding columns for totals dynamically
+    goal_col = [c for c in squad_df.columns if "goal" in c.lower()]
+    yellow_col = [c for c in squad_df.columns if "yellow" in c.lower() or "yc" in c.lower()]
+    red_col = [c for c in squad_df.columns if "red" in c.lower() or "rc" in c.lower()]
+
+    m2.metric("Total Goals", int(pd.to_numeric(squad_df[goal_col[0]], errors="coerce").fillna(0).sum()) if goal_col else "—")
+    m3.metric("Yellow Cards", int(pd.to_numeric(squad_df[yellow_col[0]], errors="coerce").fillna(0).sum()) if yellow_col else "—")
+    m4.metric("Red Cards", int(pd.to_numeric(squad_df[red_col[0]], errors="coerce").fillna(0).sum()) if red_col else "—")
+
+    st.dataframe(
+        squad_df,
+        hide_index=True,
+        use_container_width=True,
+        height=400
+    )
 
 st.divider()
 
