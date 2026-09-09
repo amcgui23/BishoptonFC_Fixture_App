@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.6.1"
+APP_CACHE_VERSION = "v2.7.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -102,7 +102,7 @@ def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
         """
         
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.6-flash',
             contents=prompt,
         )
         return response.text
