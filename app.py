@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.7.0"
+APP_CACHE_VERSION = "v2.8.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -14,6 +14,7 @@ CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 SQUAD_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
 VIDEO_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Video%20links"
 STATS_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Match%20Stats"
+YOUTUBE_CHANNEL_URL = "https://youtube.com/@mcguinnessfootballcoaching"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
@@ -225,6 +226,12 @@ def parse_matches(url, competition):
                 out.append(dict(date=current_date, round=current_round, home=h, away=a, hg=None, ag=None, status=m.group("kick"), competition=competition, youtube_url="", stats=None))
                 continue
 
+        m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
+        if m:
+            h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
+            if h and a and h != a:
+                out.append(dict(date=current_date, round=current_round, home=h, away=a, hg=None, ag=None, status="Postponed", competition=competition, youtube_url="", stats=None))
+
     info = {"url": final_url, "http": status, "parsed": len(out)}
     if not out:
         return pd.DataFrame(columns=COLS), info
@@ -338,6 +345,14 @@ def calculated_table(df):
         rows.append([t, len(r), w, d, l, gf, ga, gf - ga, 3 * w + d])
     return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
+def format_form_df(df_in, display_cols):
+    if df_in.empty:
+        return pd.DataFrame(columns=display_cols)
+    df_out = df_in[display_cols].copy()
+    if "date" in df_out.columns:
+        df_out["date"] = pd.to_datetime(df_out["date"], errors="coerce").dt.strftime("%d/%m")
+    return df_out
+
 @st.cache_data(ttl=300, show_spinner=False)
 def official_table(_v=APP_CACHE_VERSION):
     for url in TABLE_URLS:
@@ -405,6 +420,12 @@ def render_fixture_card(r, all_fixtures_df):
                     with st.expander("🤖 AI Match Breakdown", expanded=True):
                         st.markdown(st.session_state[f"analysis_{match_id}"])
 
+        with st.expander("Tactical Form Breakdown"):
+            if orr.empty:
+                st.write("No recorded games for this opponent.")
+            else:
+                st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
+
 div, cups, diagnostics = load_data()
 league = div.get(4, pd.DataFrame(columns=COLS))
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
@@ -427,6 +448,10 @@ with st.sidebar:
     if st.button("🔄 Sync Live Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+    with st.expander("System Engine"):
+        st.caption(f"Build Version: {APP_CACHE_VERSION}")
+        for item in diagnostics:
+            st.write(item)
 
 col_fx, col_tbl = st.columns([1, 1])
 
@@ -456,3 +481,77 @@ with col_tbl:
     ot, ot_url = official_table()
     tbl_data = ot if ot is not None else calculated_table(league)
     st.dataframe(tbl_data, hide_index=True, use_container_width=True, height=480)
+    if ot is not None:
+        st.caption("Source: Verified PJDYFL Feed")
+    else:
+        st.caption("Calculated live standings from parser feed.")
+
+st.divider()
+
+# Squad Statistics Section
+st.header("🏃 Squad Statistics & Performance")
+
+squad_df = fetch_squad_data(SQUAD_SHEET_CSV)
+
+if squad_df.empty:
+    st.warning("Unable to fetch squad data from Google Sheets. Ensure sheet permissions are set to 'Anyone with link can view'.")
+else:
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Active Players", len(squad_df))
+    
+    goal_col = [c for c in squad_df.columns if "goal" in c.lower()]
+    yellow_col = [c for c in squad_df.columns if "yellow" in c.lower() or "yc" in c.lower()]
+    red_col = [c for c in squad_df.columns if "red" in c.lower() or "rc" in c.lower()]
+
+    m2.metric("Total Goals", int(pd.to_numeric(squad_df[goal_col[0]], errors="coerce").fillna(0).sum()) if goal_col else "—")
+    m3.metric("Yellow Cards", int(pd.to_numeric(squad_df[yellow_col[0]], errors="coerce").fillna(0).sum()) if yellow_col else "—")
+    m4.metric("Red Cards", int(pd.to_numeric(squad_df[red_col[0]], errors="coerce").fillna(0).sum()) if red_col else "—")
+
+    st.dataframe(
+        squad_df,
+        hide_index=True,
+        use_container_width=True
+    )
+
+st.divider()
+
+# Division 4 Upcoming Fixtures
+st.header("📅 Division 4 Schedule")
+if league.empty:
+    st.info("No Division 4 league fixtures available.")
+else:
+    league_fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
+    upcoming_league = league_fx[league_fx.status != "FT"]
+    
+    if upcoming_league.empty:
+        st.caption("No upcoming Division 4 league fixtures registered.")
+    else:
+        initial_five = upcoming_league.head(5)
+        remaining_games = upcoming_league.iloc[5:]
+
+        for _, r in initial_five.iterrows():
+            render_fixture_card(r, all_fixtures_df)
+
+        if not remaining_games.empty:
+            with st.expander(f"➕ Show More Upcoming League Fixtures ({len(remaining_games)} remaining)"):
+                for _, r in remaining_games.iterrows():
+                    render_fixture_card(r, all_fixtures_df)
+
+st.divider()
+
+# Cup Competitions Section
+st.header("🏆 Cup Competitions")
+
+cup_found = False
+for cup_name, cdf in cups.items():
+    if cdf.empty:
+        continue
+    cfx = cdf[cdf.home.map(istarget) | cdf.away.map(istarget)]
+    if not cfx.empty:
+        cup_found = True
+        st.subheader(cup_name)
+        for _, r in cfx.iterrows():
+            render_fixture_card(r, all_fixtures_df)
+
+if not cup_found:
+    st.info("No Cup fixtures currently registered for Bishopton FC Black.")
