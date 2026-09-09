@@ -5,7 +5,7 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v2.1.0"
+APP_CACHE_VERSION = "v2.2.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -228,7 +228,7 @@ def fetch_squad_data(sheet_url, _v=APP_CACHE_VERSION):
         df = pd.read_csv(sheet_url)
         df.dropna(how="all", inplace=True)
         return df
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 
@@ -532,7 +532,7 @@ with col_tbl:
 
 st.divider()
 
-# NEW: Player Squad & Individual Statistics Section
+# Player Squad & Individual Statistics Section
 st.header("🏃 Squad Statistics & Performance")
 
 squad_df = fetch_squad_data(SQUAD_SHEET_CSV)
@@ -540,11 +540,9 @@ squad_df = fetch_squad_data(SQUAD_SHEET_CSV)
 if squad_df.empty:
     st.warning("Unable to fetch squad data from Google Sheets. Ensure sheet permissions are set to 'Anyone with link can view'.")
 else:
-    # Summary Cards
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Active Players", len(squad_df))
     
-    # Try finding columns for totals dynamically
     goal_col = [c for c in squad_df.columns if "goal" in c.lower()]
     yellow_col = [c for c in squad_df.columns if "yellow" in c.lower() or "yc" in c.lower()]
     red_col = [c for c in squad_df.columns if "red" in c.lower() or "rc" in c.lower()]
@@ -556,8 +554,7 @@ else:
     st.dataframe(
         squad_df,
         hide_index=True,
-        use_container_width=True,
-        height=400
+        use_container_width=True
     )
 
 st.divider()
