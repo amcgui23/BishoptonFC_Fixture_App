@@ -4,15 +4,16 @@ import pandas as pd
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
+from google import genai
 
-APP_CACHE_VERSION = "v2.4.0"
+APP_CACHE_VERSION = "v2.6.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 
-# Main squad CSV URL and Video Links CSV URL
-SQUAD_SHEET_CSV = f"https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
-VIDEO_SHEET_CSV = f"https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Video%20links"
+SQUAD_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
+VIDEO_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Video%20links"
+STATS_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Match%20Stats"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
@@ -25,20 +26,9 @@ st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@500;700;800;900&family=Inter:wght@400;500;600&display=swap');
     
-    html, body, [class*="css"] {
-        font-family: 'Inter', -apple-system, sans-serif;
-    }
-
-    h1, h2, h3, h4, .hero-title {
-        font-family: 'Montserrat', sans-serif !important;
-        letter-spacing: -0.03em;
-    }
-
-    .main .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 2.5rem !important;
-        max-width: 1240px;
-    }
+    html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
+    h1, h2, h3, h4, .hero-title { font-family: 'Montserrat', sans-serif !important; letter-spacing: -0.03em; }
+    .main .block-container { padding-top: 1.5rem !important; padding-bottom: 2.5rem !important; max-width: 1240px; }
 
     .hero-header {
         background: linear-gradient(135deg, #09131e 0%, #112233 60%, #1a3a5c 100%);
@@ -50,70 +40,14 @@ st.markdown("""
         gap: 2.5rem;
         box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
         border: 1px solid rgba(255, 255, 255, 0.1);
-        position: relative;
-        overflow: hidden;
     }
+    .hero-logo { width: 180px; height: 180px; object-fit: contain; }
+    .hero-title { color: #ffffff !important; font-weight: 900 !important; font-size: 2.4rem !important; margin: 0 !important; text-transform: uppercase; }
+    .hero-subtitle { color: #00d2ff !important; margin: 0.5rem 0 0 0 !important; font-size: 0.95rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; }
 
-    .hero-logo-container {
-        flex-shrink: 0;
-        background: transparent;
-        border: none;
-        padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .hero-logo {
-        width: 180px;
-        height: 180px;
-        object-fit: contain;
-        filter: drop-shadow(0 8px 18px rgba(0,0,0,0.55));
-    }
-
-    .hero-text {
-        display: flex;
-        flex-direction: column;
-    }
-
-    .hero-title {
-        color: #ffffff !important;
-        font-weight: 900 !important;
-        font-size: 2.4rem !important;
-        margin: 0 !important;
-        text-transform: uppercase;
-        line-height: 1.1;
-    }
-
-    .hero-subtitle {
-        color: #00d2ff !important;
-        margin: 0.5rem 0 0 0 !important;
-        font-size: 0.95rem;
-        font-weight: 700;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-    }
-
-    div[data-testid="stMetric"] {
-        background: rgba(15, 23, 42, 0.6);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        padding: 14px 16px;
-        border-radius: 10px;
-    }
-    
-    div[data-testid="stMetricLabel"] {
-        font-size: 0.75rem !important;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: #94a3b8 !important;
-    }
-
-    div[data-testid="stMetricValue"] {
-        font-size: 1.35rem !important;
-        font-weight: 800 !important;
-        color: #f8fafc !important;
-    }
+    div[data-testid="stMetric"] { background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(255, 255, 255, 0.08); padding: 14px 16px; border-radius: 10px; }
+    div[data-testid="stMetricLabel"] { font-size: 0.75rem !important; font-weight: 700; text-transform: uppercase; color: #94a3b8 !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.35rem !important; font-weight: 800 !important; color: #f8fafc !important; }
 
     .yt-btn {
         display: inline-flex;
@@ -128,38 +62,7 @@ st.markdown("""
         font-size: 0.85rem;
         margin-top: 0.5rem;
     }
-    .yt-btn:hover {
-        background-color: #CC0000;
-    }
-
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding-left: 0.75rem !important;
-            padding-right: 0.75rem !important;
-            padding-top: 1rem !important;
-        }
-
-        .hero-header {
-            flex-direction: column;
-            text-align: center;
-            padding: 1.5rem 1rem;
-            gap: 1.2rem;
-        }
-
-        .hero-logo {
-            width: 140px;
-            height: 140px;
-        }
-
-        .hero-title {
-            font-size: 1.8rem !important;
-        }
-
-        div[data-testid="stDataFrame"] {
-            width: 100% !important;
-            overflow-x: auto !important;
-        }
-    }
+    .yt-btn:hover { background-color: #CC0000; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -176,12 +79,35 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Cache-Control": "no-cache",
 }
-COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition", "youtube_url"]
+COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition", "youtube_url", "stats"]
 
+def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
+    """Calls Gemini API to generate match analysis and estimated statistics."""
+    api_key = st.secrets.get("GEMINI_API_KEY")
+    if not api_key:
+        return "⚠️ Gemini API Key missing in `.streamlit/secrets.toml`."
 
-def empty_df():
-    return pd.DataFrame(columns=COLS)
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = f"""
+        Act as a professional football performance analyst. Generate a structured match summary and estimated tactical performance statistics for this completed grassroots match:
+        - Home Team: {home_team}
+        - Away Team: {away_team}
+        - Final Score: {home_team} {hg} - {ag} {away_team}
+        - Video Link: {yt_link if yt_link else "Not available"}
 
+        Provide:
+        1. A markdown statistics breakdown table containing estimated Total Shots, Shots on Target, Possession %, Corner Kicks, Fouls Committed, and Clearances.
+        2. Three concise tactical insights (Attacking Efficiency, Defensive Workrate, Set Pieces).
+        """
+        
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+        return response.text
+    except Exception as e:
+        return f"Error generating analysis: {e}"
 
 def clean_team_name(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
@@ -189,31 +115,19 @@ def clean_team_name(text):
         return ""
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
-    
-    venues = [
-        "Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex",
-        "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park",
-        "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE",
-        "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields",
-        "Clydebank Leisure Centre", "Paisley Grammar School"
-    ]
+    venues = ["Holm Park", "Mossedge Community Pitch", "Nethercraigs Sport Complex", "Parklea playing fields", "India Tyres", "New Western Park", "Millburn Park", "Renfrew Leisure Centre", "Gray Street Astroturf", "TORYGLEN FOOTBALL CENTRE", "Williams Street Football Park", "Cowan Park", "Seedhill Playing Fields", "Clydebank Leisure Centre", "Paisley Grammar School"]
     for v in sorted(venues, key=len, reverse=True):
         text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
-
     text = text.strip(" -–:")
     if len(text) > 55 or re.search(r"\d+\s*-\s*\d+", text):
         return ""
     return text
 
-
 def norm(x):
     return clean_team_name(x).lower()
 
-
 def istarget(x):
-    n = norm(x)
-    return bool(re.search(r"\bbishopton\b.*\bblack\b", n))
-
+    return bool(re.search(r"\bbishopton\b.*\bblack\b", norm(x)))
 
 def ordinal_date(s):
     s = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", str(s).strip())
@@ -228,7 +142,6 @@ def ordinal_date(s):
             pass
     return None
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch(url, _v=APP_CACHE_VERSION):
     try:
@@ -236,7 +149,6 @@ def fetch(url, _v=APP_CACHE_VERSION):
         return r.status_code, r.url, r.text
     except Exception:
         return 404, url, ""
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_squad_data(sheet_url, _v=APP_CACHE_VERSION):
@@ -247,46 +159,41 @@ def fetch_squad_data(sheet_url, _v=APP_CACHE_VERSION):
     except Exception:
         return pd.DataFrame()
 
-
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_video_links(video_sheet_url, _v=APP_CACHE_VERSION):
     try:
         df = pd.read_csv(video_sheet_url)
         df.dropna(how="all", inplace=True)
-        
-        # Clean column names
         df.columns = [c.strip().lower() for c in df.columns]
-        
-        if "date" in df.columns:
-            df["parsed_date"] = df["date"].apply(ordinal_date)
-            df["parsed_date"] = pd.to_datetime(df["parsed_date"])
-        else:
-            df["parsed_date"] = pd.NaT
-
-        if "opponent" in df.columns:
-            df["norm_opp"] = df["opponent"].apply(norm)
-        else:
-            df["norm_opp"] = ""
-
+        df["parsed_date"] = pd.to_datetime(df["date"].apply(ordinal_date)) if "date" in df.columns else pd.NaT
+        df["norm_opp"] = df["opponent"].apply(norm) if "opponent" in df.columns else ""
         return df
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_match_stats(stats_sheet_url, _v=APP_CACHE_VERSION):
+    try:
+        df = pd.read_csv(stats_sheet_url)
+        df.dropna(how="all", inplace=True)
+        df.columns = [c.strip().lower() for c in df.columns]
+        df["parsed_date"] = pd.to_datetime(df["date"].apply(ordinal_date)) if "date" in df.columns else pd.NaT
+        df["norm_opp"] = df["opponent"].apply(norm) if "opponent" in df.columns else ""
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
     if status != 200 or not html:
-        return empty_df(), {"url": final_url, "http": status, "parsed": 0}
+        return pd.DataFrame(columns=COLS), {"url": final_url, "http": status, "parsed": 0}
 
     soup = BeautifulSoup(html, "html.parser")
     out = []
-
-    current_date = None
-    current_round = competition
+    current_date, current_round = None, competition
 
     for element in soup.find_all(['div', 'tr', 'li', 'p']):
         text = re.sub(r"\s+", " ", element.get_text(" ", strip=True)).strip()
-        
         date_match = re.search(r"(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)?,?\s*\d{1,2}(?:st|nd|rd|th)?\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s+\d{4})?", text, re.I)
         if date_match and len(text) < 60:
             parsed_dt = ordinal_date(date_match.group(0))
@@ -308,90 +215,74 @@ def parse_matches(url, competition):
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
             hg, ag = int(m.group("hg")), int(m.group("ag"))
             if h and a and h != a:
-                out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=hg, ag=ag, status="FT", competition=competition, youtube_url=""))
+                out.append(dict(date=current_date, round=current_round, home=h, away=a, hg=hg, ag=ag, status="FT", competition=competition, youtube_url="", stats=None))
                 continue
 
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
         if m:
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
             if h and a and h != a:
-                out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=None, ag=None, status=m.group("kick"), competition=competition, youtube_url=""))
+                out.append(dict(date=current_date, round=current_round, home=h, away=a, hg=None, ag=None, status=m.group("kick"), competition=competition, youtube_url="", stats=None))
                 continue
-
-        m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
-        if m:
-            h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
-            if h and a and h != a:
-                out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=None, ag=None, status="Postponed", competition=competition, youtube_url=""))
 
     info = {"url": final_url, "http": status, "parsed": len(out)}
     if not out:
-        return empty_df(), info
+        return pd.DataFrame(columns=COLS), info
     df = pd.DataFrame(out, columns=COLS).drop_duplicates(["date", "home", "away", "competition"])
     df["date"] = pd.to_datetime(df["date"])
     return df.sort_values("date").reset_index(drop=True), info
 
-
-def match_youtube_links(fixtures_df, video_df):
-    if fixtures_df.empty or video_df.empty:
+def match_youtube_and_stats(fixtures_df, video_df, stats_df):
+    if fixtures_df.empty:
         return fixtures_df
 
-    url_col = [c for c in video_df.columns if "youtube" in c or "url" in c or "link" in c]
-    if not url_col:
-        return fixtures_df
-
-    link_column = url_col[0]
+    url_col = [c for c in video_df.columns if "youtube" in c or "url" in c or "link" in c] if not video_df.empty else []
+    link_column = url_col[0] if url_col else None
 
     for idx, row in fixtures_df.iterrows():
         f_date = row["date"]
         is_home = istarget(row["home"])
-        opp = row["away"] if is_home else row["home"]
-        opp_norm = norm(opp)
+        opp_norm = norm(row["away"] if is_home else row["home"])
 
-        # Match by date or opponent name
-        matched = video_df[
-            (video_df["parsed_date"] == f_date) | 
-            (video_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (video_df["norm_opp"] != ""))
-        ]
+        if link_column and not video_df.empty:
+            matched_v = video_df[(video_df["parsed_date"] == f_date) | (video_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (video_df["norm_opp"] != ""))]
+            if not matched_v.empty and pd.notna(matched_v.iloc[0][link_column]):
+                fixtures_df.at[idx, "youtube_url"] = str(matched_v.iloc[0][link_column]).strip()
 
-        if not matched.empty:
-            yt_url = matched.iloc[0][link_column]
-            if pd.notna(yt_url) and str(yt_url).strip():
-                fixtures_df.at[idx, "youtube_url"] = str(yt_url).strip()
+        if not stats_df.empty:
+            matched_s = stats_df[(stats_df["parsed_date"] == f_date) | (stats_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (stats_df["norm_opp"] != ""))]
+            if not matched_s.empty:
+                fixtures_df.at[idx, "stats"] = matched_s.iloc[0].to_dict()
 
     return fixtures_df
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data(_v=APP_CACHE_VERSION):
     div, cups, diagnostics = {}, {}, []
     video_df = fetch_video_links(VIDEO_SHEET_CSV)
+    stats_df = fetch_match_stats(STATS_SHEET_CSV)
 
     for d, u in DIV_URLS.items():
         try:
             df, info = parse_matches(u, f"Division {d}")
-            df = match_youtube_links(df, video_df)
+            df = match_youtube_and_stats(df, video_df, stats_df)
             div[d] = df
             diagnostics.append(f"Division {d}: {info}")
         except Exception as e:
-            div[d] = empty_df()
+            div[d] = pd.DataFrame(columns=COLS)
             diagnostics.append(f"Division {d}: ERROR {type(e).__name__}: {e}")
 
     for n, u in CUPS.items():
         try:
             df, info = parse_matches(u, n)
-            df = match_youtube_links(df, video_df)
+            df = match_youtube_and_stats(df, video_df, stats_df)
             cups[n] = df
             diagnostics.append(f"{n}: {info}")
         except Exception as e:
-            cups[n] = empty_df()
+            cups[n] = pd.DataFrame(columns=COLS)
             diagnostics.append(f"{n}: ERROR {type(e).__name__}: {e}")
 
     return div, cups, diagnostics
-
 
 def results(df, team):
     cols = ["date", "opponent", "GF", "GA", "GD", "Result", "venue", "competition"]
@@ -409,15 +300,11 @@ def results(df, team):
             gf, ga, opp, venue = int(r["ag"]), int(r["hg"]), r["home"], "A"
         else:
             continue
-        rows.append({"date": r["date"], "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga,
-                     "Result": "W" if gf > ga else "D" if gf == ga else "L", "venue": venue,
-                     "competition": r["competition"]})
+        rows.append({"date": r["date"], "opponent": opp, "GF": gf, "GA": ga, "GD": gf-ga, "Result": "W" if gf > ga else "D" if gf == ga else "L", "venue": venue, "competition": r["competition"]})
     return pd.DataFrame(rows, columns=cols).sort_values("date", ascending=False) if rows else pd.DataFrame(columns=cols)
-
 
 def form(df, team, n=5):
     return results(df, team).head(n)
-
 
 def strength(r):
     if r.empty:
@@ -427,7 +314,6 @@ def strength(r):
     recent = r.head(5)
     return .55*ppg(r) + .30*ppg(recent) + .15*(1 + math.tanh(recent.GD.mean()/3))
 
-
 def win_chance(a, b, home=True):
     sa, sb = strength(a), strength(b)
     if sa is None or sb is None:
@@ -435,33 +321,22 @@ def win_chance(a, b, home=True):
     x = sa - sb + (0.18 if home else -0.02)
     return max(.05, min(.95, 1/(1+math.exp(-1.35*x))))
 
-
 def calculated_table(df):
     cols = ["Team", "P", "W", "D", "L", "GF", "GA", "GD", "Pts"]
     if df.empty or not {"home", "away"}.issubset(df.columns):
         return pd.DataFrame(columns=cols)
-
     raw_teams = list(df.home.dropna()) + list(df.away.dropna())
     valid_teams = sorted(list(set([t for t in [clean_team_name(x) for x in raw_teams] if t])))
-    
     rows = []
     for t in valid_teams:
         r = results(df, t)
         if r.empty:
             rows.append([t, 0, 0, 0, 0, 0, 0, 0, 0])
             continue
-        w = (r["Result"] == "W").sum()
-        d = (r["Result"] == "D").sum()
-        l = (r["Result"] == "L").sum()
-        gf = r["GF"].sum()
-        ga = r["GA"].sum()
-        gd = gf - ga
-        pts = 3 * w + d
-        rows.append([t, len(r), w, d, l, gf, ga, gd, pts])
-        
-    df_out = pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
-    return df_out
-
+        w, d, l = (r["Result"] == "W").sum(), (r["Result"] == "D").sum(), (r["Result"] == "L").sum()
+        gf, ga = r["GF"].sum(), r["GA"].sum()
+        rows.append([t, len(r), w, d, l, gf, ga, gf - ga, 3 * w + d])
+    return pd.DataFrame(rows, columns=cols).sort_values(["Pts", "GD", "GF"], ascending=False).reset_index(drop=True)
 
 @st.cache_data(ttl=300, show_spinner=False)
 def official_table(_v=APP_CACHE_VERSION):
@@ -481,40 +356,18 @@ def official_table(_v=APP_CACHE_VERSION):
             continue
     return None, None
 
-
-def format_form_df(df_in, display_cols):
-    if df_in.empty:
-        return pd.DataFrame(columns=display_cols)
-    df_out = df_in[display_cols].copy()
-    if "date" in df_out.columns:
-        df_out["date"] = pd.to_datetime(df_out["date"], errors="coerce").dt.strftime("%d/%m")
-    return df_out
-
-
 def render_fixture_card(r, all_fixtures_df):
     is_home = istarget(r["home"])
-    
-    if is_home:
-        home_team, away_team = "Bishopton FC Black", r["away"]
-        home_score, away_score = r["hg"], r["ag"]
-        venue = "Home"
-    else:
-        home_team, away_team = r["home"], "Bishopton FC Black"
-        home_score, away_score = r["hg"], r["ag"]
-        venue = "Away"
-
-    comp = r["competition"]
+    home_team, away_team = ("Bishopton FC Black", r["away"]) if is_home else (r["home"], "Bishopton FC Black")
+    venue = "Home" if is_home else "Away"
     opp = away_team if is_home else home_team
+
     br, orr = form(all_fixtures_df, "Bishopton FC Black"), form(all_fixtures_df, opp)
     p = win_chance(br, orr, is_home)
-    
-    if r["status"] == "FT":
-        status_display = f"{int(home_score)} - {int(away_score)}"
-    else:
-        status_display = str(r["status"])
+    status_display = f"{int(r['hg'])} - {int(r['ag'])}" if r["status"] == "FT" else str(r["status"])
 
     with st.container(border=True):
-        st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{comp}* • *{venue}*")
+        st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}* • *{venue}*")
         st.markdown(f"**{home_team}** `{status_display}` **{away_team}**")
         
         c1, c2, c3 = st.columns(3)
@@ -522,22 +375,40 @@ def render_fixture_card(r, all_fixtures_df):
         c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
         c3.metric("Win Probability", f"{p:.0%}" if p is not None else "N/A")
 
+        col_btn, col_stat = st.columns([1, 1])
         yt_link = str(r.get("youtube_url", "")).strip()
-        if yt_link and yt_link.lower() != "nan":
-            st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
+        
+        with col_btn:
+            if yt_link and yt_link.lower() != "nan":
+                st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
 
-        with st.expander("Tactical Form Breakdown"):
-            if orr.empty:
-                st.write("No recorded games for this opponent.")
-            else:
-                st.dataframe(format_form_df(orr, ["date", "opponent", "GF", "GA", "Result", "competition"]), hide_index=True, use_container_width=True)
-
+        stats_data = r.get("stats")
+        with col_stat:
+            if stats_data and isinstance(stats_data, dict):
+                with st.expander("📊 Match Statistics"):
+                    s_df = pd.DataFrame([
+                        {"Category": "Total Shots", "Stat": stats_data.get("shots", "—")},
+                        {"Category": "Shots on Target", "Stat": stats_data.get("shots_on_target", "—")},
+                        {"Category": "Possession", "Stat": stats_data.get("possession", "—")},
+                        {"Category": "Corners", "Stat": stats_data.get("corners", "—")},
+                        {"Category": "Fouls", "Stat": stats_data.get("fouls", "—")},
+                    ])
+                    st.dataframe(s_df, hide_index=True, use_container_width=True)
+            elif r["status"] == "FT":
+                match_id = f"{r['date'].strftime('%Y%m%d')}_{opp}"
+                if st.button("✨ AI Generate Analysis", key=f"ai_{match_id}"):
+                    with st.spinner("Generating AI performance analysis..."):
+                        analysis = generate_ai_analysis(home_team, away_team, r['hg'], r['ag'], yt_link)
+                        st.session_state[f"analysis_{match_id}"] = analysis
+                
+                if f"analysis_{match_id}" in st.session_state:
+                    with st.expander("🤖 AI Match Breakdown", expanded=True):
+                        st.markdown(st.session_state[f"analysis_{match_id}"])
 
 div, cups, diagnostics = load_data()
-league = div.get(4, empty_df())
-
+league = div.get(4, pd.DataFrame(columns=COLS))
 all_dfs = [x for x in list(div.values()) + list(cups.values()) if not x.empty]
-all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else empty_df()
+all_fixtures_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame(columns=COLS)
 
 st.markdown(f"""
     <div class="hero-header">
@@ -556,10 +427,6 @@ with st.sidebar:
     if st.button("🔄 Sync Live Data", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
-    with st.expander("System Engine"):
-        st.caption(f"Build Version: {APP_CACHE_VERSION}")
-        for item in diagnostics:
-            st.write(item)
 
 col_fx, col_tbl = st.columns([1, 1])
 
@@ -582,103 +449,10 @@ with col_fx:
             st.caption("No completed results recorded yet.")
         else:
             for _, r in completed_all.head(3).iterrows():
-                is_home = istarget(r["home"])
-                
-                if is_home:
-                    h_team, a_team = "Bishopton FC Black", r["away"]
-                    score = f"{int(r['hg'])} - {int(r['ag'])}"
-                else:
-                    h_team, a_team = r["home"], "Bishopton FC Black"
-                    score = f"{int(r['hg'])} - {int(r['ag'])}"
-
-                with st.container(border=True):
-                    st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}*")
-                    st.markdown(f"**{h_team}** `{score}` **{a_team}**")
-                    
-                    yt_link = str(r.get("youtube_url", "")).strip()
-                    if yt_link and yt_link.lower() != "nan":
-                        st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
+                render_fixture_card(r, all_fixtures_df)
 
 with col_tbl:
     st.subheader("📊 Division 4 Standings")
     ot, ot_url = official_table()
     tbl_data = ot if ot is not None else calculated_table(league)
-    
-    st.dataframe(
-        tbl_data,
-        hide_index=True,
-        use_container_width=True,
-        height=480
-    )
-    if ot is not None:
-        st.caption("Source: Verified PJDYFL Feed")
-    else:
-        st.caption("Calculated live standings from parser feed.")
-
-st.divider()
-
-# Player Squad & Individual Statistics Section
-st.header("🏃 Squad Statistics & Performance")
-
-squad_df = fetch_squad_data(SQUAD_SHEET_CSV)
-
-if squad_df.empty:
-    st.warning("Unable to fetch squad data from Google Sheets. Ensure sheet permissions are set to 'Anyone with link can view'.")
-else:
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Active Players", len(squad_df))
-    
-    goal_col = [c for c in squad_df.columns if "goal" in c.lower()]
-    yellow_col = [c for c in squad_df.columns if "yellow" in c.lower() or "yc" in c.lower()]
-    red_col = [c for c in squad_df.columns if "red" in c.lower() or "rc" in c.lower()]
-
-    m2.metric("Total Goals", int(pd.to_numeric(squad_df[goal_col[0]], errors="coerce").fillna(0).sum()) if goal_col else "—")
-    m3.metric("Yellow Cards", int(pd.to_numeric(squad_df[yellow_col[0]], errors="coerce").fillna(0).sum()) if yellow_col else "—")
-    m4.metric("Red Cards", int(pd.to_numeric(squad_df[red_col[0]], errors="coerce").fillna(0).sum()) if red_col else "—")
-
-    st.dataframe(
-        squad_df,
-        hide_index=True,
-        use_container_width=True
-    )
-
-st.divider()
-
-st.header("📅 Division 4 Schedule")
-if league.empty:
-    st.info("No Division 4 league fixtures available.")
-else:
-    league_fx = league[league.home.map(istarget) | league.away.map(istarget)].sort_values("date")
-    upcoming_league = league_fx[league_fx.status != "FT"]
-    
-    if upcoming_league.empty:
-        st.caption("No upcoming Division 4 league fixtures registered.")
-    else:
-        initial_five = upcoming_league.head(5)
-        remaining_games = upcoming_league.iloc[5:]
-
-        for _, r in initial_five.iterrows():
-            render_fixture_card(r, all_fixtures_df)
-
-        if not remaining_games.empty:
-            with st.expander(f"➕ Show More Upcoming League Fixtures ({len(remaining_games)} remaining)"):
-                for _, r in remaining_games.iterrows():
-                    render_fixture_card(r, all_fixtures_df)
-
-st.divider()
-
-st.header("🏆 Cup Competitions")
-
-cup_found = False
-for cup_name, cdf in cups.items():
-    if cdf.empty:
-        continue
-    cfx = cdf[cdf.home.map(istarget) | cdf.away.map(istarget)]
-    if not cfx.empty:
-        cup_found = True
-        st.subheader(cup_name)
-        for _, r in cfx.iterrows():
-            render_fixture_card(r, all_fixtures_df)
-
-if not cup_found:
-    st.info("No Cup fixtures currently registered for Bishopton FC Black.")
+    st.dataframe(tbl_data, hide_index=True, use_container_width=True, height=480)
