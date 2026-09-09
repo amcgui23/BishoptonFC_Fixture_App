@@ -5,11 +5,14 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 
-APP_CACHE_VERSION = "v2.2.0"
+APP_CACHE_VERSION = "v2.4.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
-SQUAD_SHEET_CSV = "https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
+
+# Main squad CSV URL and Video Links CSV URL
+SQUAD_SHEET_CSV = f"https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/export?format=csv"
+VIDEO_SHEET_CSV = f"https://docs.google.com/spreadsheets/d/1-XrsLQsx3zxMhAGkTxbMA9DJacIy2xtEgAjiKiRtkLw/gviz/tq?tqx=out:csv&sheet=Video%20links"
 
 st.set_page_config(
     page_title="Bishopton FC | Performance Hub",
@@ -112,6 +115,23 @@ st.markdown("""
         color: #f8fafc !important;
     }
 
+    .yt-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        background-color: #FF0000;
+        color: white !important;
+        padding: 0.4rem 0.8rem;
+        border-radius: 6px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+    }
+    .yt-btn:hover {
+        background-color: #CC0000;
+    }
+
     @media (max-width: 768px) {
         .main .block-container {
             padding-left: 0.75rem !important;
@@ -156,7 +176,7 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Cache-Control": "no-cache",
 }
-COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition"]
+COLS = ["date", "round", "home", "away", "hg", "ag", "status", "competition", "youtube_url"]
 
 
 def empty_df():
@@ -165,10 +185,8 @@ def empty_df():
 
 def clean_team_name(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
-    
     if re.search(r"Half time|Kick off|Full time|Round:|P-P", text, re.I):
         return ""
-    
     text = re.sub(r"^(?:Round|Week|Matchday)\s*\d+\s*", "", text, flags=re.I)
     text = re.sub(r"\b\d{1,2}:\d{2}\b", "", text)
     
@@ -183,10 +201,8 @@ def clean_team_name(text):
         text = re.sub(r"\b" + re.escape(v) + r"\b", "", text, flags=re.I)
 
     text = text.strip(" -–:")
-    
     if len(text) > 55 or re.search(r"\d+\s*-\s*\d+", text):
         return ""
-        
     return text
 
 
@@ -232,6 +248,31 @@ def fetch_squad_data(sheet_url, _v=APP_CACHE_VERSION):
         return pd.DataFrame()
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_video_links(video_sheet_url, _v=APP_CACHE_VERSION):
+    try:
+        df = pd.read_csv(video_sheet_url)
+        df.dropna(how="all", inplace=True)
+        
+        # Clean column names
+        df.columns = [c.strip().lower() for c in df.columns]
+        
+        if "date" in df.columns:
+            df["parsed_date"] = df["date"].apply(ordinal_date)
+            df["parsed_date"] = pd.to_datetime(df["parsed_date"])
+        else:
+            df["parsed_date"] = pd.NaT
+
+        if "opponent" in df.columns:
+            df["norm_opp"] = df["opponent"].apply(norm)
+        else:
+            df["norm_opp"] = ""
+
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 def parse_matches(url, competition):
     status, final_url, html = fetch(url)
     if status != 200 or not html:
@@ -268,7 +309,7 @@ def parse_matches(url, competition):
             hg, ag = int(m.group("hg")), int(m.group("ag"))
             if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=hg, ag=ag, status="FT", competition=competition))
+                                hg=hg, ag=ag, status="FT", competition=competition, youtube_url=""))
                 continue
 
         m = re.search(r"^(?P<home>.+?)\s+(?P<kick>\d{1,2}:\d{2})\s+(?P<away>.+)$", text)
@@ -276,7 +317,7 @@ def parse_matches(url, competition):
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
             if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=None, ag=None, status=m.group("kick"), competition=competition))
+                                hg=None, ag=None, status=m.group("kick"), competition=competition, youtube_url=""))
                 continue
 
         m = re.search(r"^(?P<home>.+?)\s+P-P\s+(?P<away>.+)$", text, re.I)
@@ -284,7 +325,7 @@ def parse_matches(url, competition):
             h, a = clean_team_name(m.group("home")), clean_team_name(m.group("away"))
             if h and a and h != a:
                 out.append(dict(date=current_date, round=current_round, home=h, away=a,
-                                hg=None, ag=None, status="Postponed", competition=competition))
+                                hg=None, ag=None, status="Postponed", competition=competition, youtube_url=""))
 
     info = {"url": final_url, "http": status, "parsed": len(out)}
     if not out:
@@ -294,25 +335,61 @@ def parse_matches(url, competition):
     return df.sort_values("date").reset_index(drop=True), info
 
 
+def match_youtube_links(fixtures_df, video_df):
+    if fixtures_df.empty or video_df.empty:
+        return fixtures_df
+
+    url_col = [c for c in video_df.columns if "youtube" in c or "url" in c or "link" in c]
+    if not url_col:
+        return fixtures_df
+
+    link_column = url_col[0]
+
+    for idx, row in fixtures_df.iterrows():
+        f_date = row["date"]
+        is_home = istarget(row["home"])
+        opp = row["away"] if is_home else row["home"]
+        opp_norm = norm(opp)
+
+        # Match by date or opponent name
+        matched = video_df[
+            (video_df["parsed_date"] == f_date) | 
+            (video_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (video_df["norm_opp"] != ""))
+        ]
+
+        if not matched.empty:
+            yt_url = matched.iloc[0][link_column]
+            if pd.notna(yt_url) and str(yt_url).strip():
+                fixtures_df.at[idx, "youtube_url"] = str(yt_url).strip()
+
+    return fixtures_df
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_data(_v=APP_CACHE_VERSION):
     div, cups, diagnostics = {}, {}, []
+    video_df = fetch_video_links(VIDEO_SHEET_CSV)
+
     for d, u in DIV_URLS.items():
         try:
             df, info = parse_matches(u, f"Division {d}")
+            df = match_youtube_links(df, video_df)
             div[d] = df
             diagnostics.append(f"Division {d}: {info}")
         except Exception as e:
             div[d] = empty_df()
             diagnostics.append(f"Division {d}: ERROR {type(e).__name__}: {e}")
+
     for n, u in CUPS.items():
         try:
             df, info = parse_matches(u, n)
+            df = match_youtube_links(df, video_df)
             cups[n] = df
             diagnostics.append(f"{n}: {info}")
         except Exception as e:
             cups[n] = empty_df()
             diagnostics.append(f"{n}: ERROR {type(e).__name__}: {e}")
+
     return div, cups, diagnostics
 
 
@@ -445,6 +522,10 @@ def render_fixture_card(r, all_fixtures_df):
         c2.metric("Opponent Form", "".join(orr.Result.tolist()) if not orr.empty else "—")
         c3.metric("Win Probability", f"{p:.0%}" if p is not None else "N/A")
 
+        yt_link = str(r.get("youtube_url", "")).strip()
+        if yt_link and yt_link.lower() != "nan":
+            st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
+
         with st.expander("Tactical Form Breakdown"):
             if orr.empty:
                 st.write("No recorded games for this opponent.")
@@ -513,6 +594,10 @@ with col_fx:
                 with st.container(border=True):
                     st.markdown(f"**{r['date'].strftime('%a %d %b %Y')}** • *{r['competition']}*")
                     st.markdown(f"**{h_team}** `{score}` **{a_team}**")
+                    
+                    yt_link = str(r.get("youtube_url", "")).strip()
+                    if yt_link and yt_link.lower() != "nan":
+                        st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
 
 with col_tbl:
     st.subheader("📊 Division 4 Standings")
