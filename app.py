@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.6.0"
+APP_CACHE_VERSION = "v2.6.1"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -101,22 +101,13 @@ def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
         2. Three concise tactical insights (Attacking Efficiency, Defensive Workrate, Set Pieces).
         """
         
-        # Updated to a supported model identifier
-       # response = client.models.generate_content(
-         #   model='gemini-1.5-flash',
-         #   contents=prompt,
-        #)
-
-                # Updated model parameter string
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-2.5-flash',
             contents=prompt,
         )
-
         return response.text
     except Exception as e:
         return f"Error generating analysis: {e}"
-
 
 def clean_team_name(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
