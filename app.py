@@ -101,13 +101,15 @@ def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
         2. Three concise tactical insights (Attacking Efficiency, Defensive Workrate, Set Pieces).
         """
         
+        # Updated to a supported model identifier
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-1.5-flash',
             contents=prompt,
         )
         return response.text
     except Exception as e:
         return f"Error generating analysis: {e}"
+
 
 def clean_team_name(text):
     text = re.sub(r"\s+", " ", str(text or "")).strip()
