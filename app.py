@@ -102,10 +102,17 @@ def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
         """
         
         # Updated to a supported model identifier
+       # response = client.models.generate_content(
+         #   model='gemini-1.5-flash',
+         #   contents=prompt,
+        #)
+
+                # Updated model parameter string
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.0-flash',
             contents=prompt,
         )
+
         return response.text
     except Exception as e:
         return f"Error generating analysis: {e}"
