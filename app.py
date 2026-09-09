@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.8.0"
+APP_CACHE_VERSION = "v2.9.0"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -97,9 +97,15 @@ def generate_ai_analysis(home_team, away_team, hg, ag, yt_link=""):
         - Final Score: {home_team} {hg} - {ag} {away_team}
         - Video Link: {yt_link if yt_link else "Not available"}
 
+        FORMATTING REQUIREMENTS:
+        - DO NOT use top-level Markdown headers (strictly NO '#', '##', or '###').
+        - Use simple bold inline text (e.g. **Match Analysis**) for section headers.
+        - Ensure text and markdown tables fit cleanly inside standard UI containers without causing line wraps on single words.
+
         Provide:
-        1. A markdown statistics breakdown table containing estimated Total Shots, Shots on Target, Possession %, Corner Kicks, Fouls Committed, and Clearances.
-        2. Three concise tactical insights (Attacking Efficiency, Defensive Workrate, Set Pieces).
+        1. **Match Details** summary.
+        2. **Estimated Match Statistics** table (Total Shots, Shots on Target, Possession %, Corner Kicks, Fouls Committed, Clearances).
+        3. **Tactical Insights** (Attacking Efficiency, Defensive Workrate, Set Pieces).
         """
         
         response = client.models.generate_content(
@@ -398,6 +404,8 @@ def render_fixture_card(r, all_fixtures_df):
                 st.markdown(f'<a href="{yt_link}" target="_blank" class="yt-btn">▶ Watch Match Footage</a>', unsafe_allow_html=True)
 
         stats_data = r.get("stats")
+        match_id = f"{r['date'].strftime('%Y%m%d')}_{opp}"
+
         with col_stat:
             if stats_data and isinstance(stats_data, dict):
                 with st.expander("📊 Match Statistics"):
@@ -410,15 +418,14 @@ def render_fixture_card(r, all_fixtures_df):
                     ])
                     st.dataframe(s_df, hide_index=True, use_container_width=True)
             elif r["status"] == "FT":
-                match_id = f"{r['date'].strftime('%Y%m%d')}_{opp}"
                 if st.button("✨ AI Generate Analysis", key=f"ai_{match_id}"):
                     with st.spinner("Generating AI performance analysis..."):
                         analysis = generate_ai_analysis(home_team, away_team, r['hg'], r['ag'], yt_link)
                         st.session_state[f"analysis_{match_id}"] = analysis
-                
-                if f"analysis_{match_id}" in st.session_state:
-                    with st.expander("🤖 AI Match Breakdown", expanded=True):
-                        st.markdown(st.session_state[f"analysis_{match_id}"])
+
+        if f"analysis_{match_id}" in st.session_state:
+            with st.expander("🤖 AI Match Breakdown", expanded=True):
+                st.markdown(st.session_state[f"analysis_{match_id}"])
 
         with st.expander("Tactical Form Breakdown"):
             if orr.empty:
