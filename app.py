@@ -18,10 +18,14 @@ FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
 
 st.set_page_config(
+
     page_title="Bishopton FC | Performance Hub",
+
     page_icon="⚽",
+
     layout="wide",
-    initial_sidebar_state="collapsed"
+
+ 
 )
 
 
