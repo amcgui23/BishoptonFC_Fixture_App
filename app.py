@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.9.0"
+APP_CACHE_VERSION = "v2.9.2"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -249,21 +249,50 @@ def match_youtube_and_stats(fixtures_df, video_df, stats_df):
     if fixtures_df.empty:
         return fixtures_df
 
-    url_col = [c for c in video_df.columns if "youtube" in c or "url" in c or "link" in c] if not video_df.empty else []
-    link_column = url_col[0] if url_col else None
+    # Explicitly look for youtube/url/link column in normalized video_df
+    link_column = None
+    if not video_df.empty:
+        for c in video_df.columns:
+            if any(k in c.lower() for k in ["youtube", "url", "link"]):
+                link_column = c
+                break
 
     for idx, row in fixtures_df.iterrows():
         f_date = row["date"]
         is_home = istarget(row["home"])
-        opp_norm = norm(row["away"] if is_home else row["home"])
+        opp_raw = row["away"] if is_home else row["home"]
+        opp_norm = norm(opp_raw)
 
+        # Match Video Links
         if link_column and not video_df.empty:
-            matched_v = video_df[(video_df["parsed_date"] == f_date) | (video_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (video_df["norm_opp"] != ""))]
-            if not matched_v.empty and pd.notna(matched_v.iloc[0][link_column]):
-                fixtures_df.at[idx, "youtube_url"] = str(matched_v.iloc[0][link_column]).strip()
+            matched_v = pd.DataFrame()
+            
+            # 1. Match by date if available
+            if "parsed_date" in video_df.columns:
+                matched_v = video_df[video_df["parsed_date"] == f_date]
+            
+            # 2. Fallback to opponent string matching
+            if matched_v.empty and "norm_opp" in video_df.columns:
+                matched_v = video_df[video_df["norm_opp"].apply(
+                    lambda x: bool(x) and (x in opp_norm or opp_norm in x)
+                )]
 
+            if not matched_v.empty:
+                val = matched_v.iloc[0][link_column]
+                if pd.notna(val) and str(val).strip().lower() != "nan":
+                    fixtures_df.at[idx, "youtube_url"] = str(val).strip()
+
+        # Match Match Stats
         if not stats_df.empty:
-            matched_s = stats_df[(stats_df["parsed_date"] == f_date) | (stats_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (stats_df["norm_opp"] != ""))]
+            matched_s = pd.DataFrame()
+            if "parsed_date" in stats_df.columns:
+                matched_s = stats_df[stats_df["parsed_date"] == f_date]
+            
+            if matched_s.empty and "norm_opp" in stats_df.columns:
+                matched_s = stats_df[stats_df["norm_opp"].apply(
+                    lambda x: bool(x) and (x in opp_norm or opp_norm in x)
+                )]
+                
             if not matched_s.empty:
                 fixtures_df.at[idx, "stats"] = matched_s.iloc[0].to_dict()
 
