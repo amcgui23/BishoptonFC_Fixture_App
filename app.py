@@ -6,7 +6,7 @@ import streamlit as st
 from bs4 import BeautifulSoup
 from google import genai
 
-APP_CACHE_VERSION = "v2.9.0"
+APP_CACHE_VERSION = "v2.9.1"
 
 FILE_ID = "1shpFhmc52QBr1z4eZV0g1g8KIuakU4rv"
 CLUB_LOGO_URL = f"https://drive.google.com/thumbnail?id={FILE_ID}&sz=w1000"
@@ -255,15 +255,26 @@ def match_youtube_and_stats(fixtures_df, video_df, stats_df):
     for idx, row in fixtures_df.iterrows():
         f_date = row["date"]
         is_home = istarget(row["home"])
-        opp_norm = norm(row["away"] if is_home else row["home"])
+        opp_raw = row["away"] if is_home else row["home"]
+        opp_norm = norm(opp_raw)
 
         if link_column and not video_df.empty:
-            matched_v = video_df[(video_df["parsed_date"] == f_date) | (video_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (video_df["norm_opp"] != ""))]
+            date_match = video_df[video_df["parsed_date"] == f_date]
+            opp_match = video_df[video_df["norm_opp"].apply(
+                lambda x: bool(x) and (x in opp_norm or opp_norm in x)
+            )]
+            
+            matched_v = pd.concat([date_match, opp_match]).drop_duplicates()
+
             if not matched_v.empty and pd.notna(matched_v.iloc[0][link_column]):
                 fixtures_df.at[idx, "youtube_url"] = str(matched_v.iloc[0][link_column]).strip()
 
         if not stats_df.empty:
-            matched_s = stats_df[(stats_df["parsed_date"] == f_date) | (stats_df["norm_opp"].str.contains(opp_norm, regex=False, case=False) & (stats_df["norm_opp"] != ""))]
+            date_match_s = stats_df[stats_df["parsed_date"] == f_date]
+            opp_match_s = stats_df[stats_df["norm_opp"].apply(
+                lambda x: bool(x) and (x in opp_norm or opp_norm in x)
+            )]
+            matched_s = pd.concat([date_match_s, opp_match_s]).drop_duplicates()
             if not matched_s.empty:
                 fixtures_df.at[idx, "stats"] = matched_s.iloc[0].to_dict()
 
